@@ -28,11 +28,13 @@ router.get('/', async (req: Request, res: Response) => {
   });
 });
 
+import { authenticate, requireRole } from '../middleware/auth';
+
 /**
  * DELETE /api/cache
  * Flush all cached data.
  */
-router.delete('/cache', (req: Request, res: Response) => {
+router.delete('/cache', authenticate, requireRole('admin'), (req: Request, res: Response) => {
   cache.flush();
   res.json({ success: true, message: 'Cache flushed successfully' });
 });

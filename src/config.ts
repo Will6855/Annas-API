@@ -34,4 +34,13 @@ export const config = {
     .split(',')
     .map(d => d.trim())
     .filter(Boolean),
+
+  db: {
+    url: process.env.DATABASE_URL || '',
+  },
+
+  auth: {
+    jwtSecret: process.env.JWT_SECRET || 'fallback_secret_do_not_use_in_prod',
+    jwtExpiresIn: process.env.JWT_EXPIRES_IN || '24h',
+  }
 };

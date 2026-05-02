@@ -1,3 +1,4 @@
+import 'reflect-metadata';
 import dotenv from 'dotenv';
 dotenv.config();
 
@@ -14,6 +15,8 @@ import searchRouter from './routes/search';
 import bookRouter from './routes/book';
 import relatedRouter from './routes/related';
 import healthRouter from './routes/health';
+import authRouter from './routes/auth';
+import { initializeDatabase } from './db';
 
 const app = express();
 
@@ -44,7 +47,13 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // ── Routes ────────────────────────────────────────────────────────────────────
+app.use('/api/auth',     authRouter);
 app.use('/health',       healthRouter);
+
+// Require Bearer token for all other API endpoints
+import { authenticate } from './middleware/auth';
+app.use('/api/',         authenticate);
+
 app.use('/api/cache',    healthRouter);   // DELETE /api/cache is on healthRouter
 app.use('/api/search',   searchRouter);
 app.use('/api/book',     relatedRouter);  // /api/book/:md5/related — must come before bookRouter
@@ -81,6 +90,7 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 const PORT = config.server.port;
 
 app.listen(PORT, async () => {
+  await initializeDatabase();
   logger.info(`🚀 Anna's Archive API running on http://localhost:${PORT}`);
   logger.info(`📋 Environment: ${config.server.env}`);
   logger.info(`🌐 Domain rotation: ${config.domains.join(' → ')}`);

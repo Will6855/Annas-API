@@ -48,17 +48,17 @@ router.get('/:md5', async (req: Request, res: Response): Promise<any> => {
     if (!book.title) {
       return res.status(404).json({
         success: false,
-        error:   'Book not found or page could not be parsed.',
+        error: 'Book not found or page could not be parsed.',
         md5,
       });
     }
 
     const payload = {
       success: true,
-      md5:     md5.toLowerCase(),
+      md5: md5.toLowerCase(),
       book,
       domain,
-      cached:  false,
+      cached: false,
       responseTime: Date.now() - start,
     };
 
@@ -68,7 +68,7 @@ router.get('/:md5', async (req: Request, res: Response): Promise<any> => {
     logger.error(`Book scrape failed: ${err.message}`, { md5 });
     return res.status(502).json({
       success: false,
-      error:   err.message,
+      error: err.message,
       md5,
     });
   }
