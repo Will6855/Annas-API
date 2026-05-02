@@ -39,7 +39,7 @@ router.get('/:md5/related', async (req: Request, res: Response): Promise<any> =>
 
   // ── Related cache check ────────────────────────────────────────────────────
   if (!forceRefresh) {
-    const cached = cache.getRelated(md5);
+    const cached = await cache.getRelated(md5);
     if (cached) {
       logger.debug(`Cache HIT [related] ${md5}`);
       return res.json({ ...cached, cached: true, responseTime: Date.now() - start });
@@ -48,7 +48,7 @@ router.get('/:md5/related', async (req: Request, res: Response): Promise<any> =>
 
   // ── We need the source book — check book cache first, else scrape ──────────
   let sourceBook: BookDetail;
-  const cachedBook = cache.getBook(md5);
+  const cachedBook = await cache.getBook(md5);
   if (cachedBook) {
     sourceBook = cachedBook.book;
     logger.debug(`Using cached book for related search: "${sourceBook.title}"`);
@@ -59,7 +59,7 @@ router.get('/:md5/related', async (req: Request, res: Response): Promise<any> =>
         return res.status(404).json({ success: false, error: 'Source book not found.', md5 });
       }
       // Store it in book cache for future calls
-      cache.setBook(md5, { success: true, md5: md5.toLowerCase(), book, cached: false });
+      await cache.setBook(md5, { success: true, md5: md5.toLowerCase(), book, cached: false });
       sourceBook = book;
     } catch (err: any) {
       logger.error(`Related: could not fetch source book ${md5}: ${err.message}`);
@@ -88,7 +88,7 @@ router.get('/:md5/related', async (req: Request, res: Response): Promise<any> =>
       responseTime: Date.now() - start,
     };
 
-    cache.setRelated(md5, payload);
+    await cache.setRelated(md5, payload);
     return res.json(payload);
   } catch (err: any) {
     logger.error(`Related scrape failed: ${err.message}`, { md5 });

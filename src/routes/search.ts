@@ -40,7 +40,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   const start = Date.now();
 
   // ── Cache check ────────────────────────────────────────────────────────────
-  const cached = cache.getSearch(q, pageNum, filters);
+  const cached = await cache.getSearch(q, pageNum, filters);
   if (cached) {
     logger.debug(`Cache HIT [search] "${q}" p${pageNum}`);
     return res.json({
@@ -66,7 +66,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
       responseTime: Date.now() - start,
     };
 
-    cache.setSearch(q, pageNum, filters, payload);
+    await cache.setSearch(q, pageNum, filters, payload);
     return res.json(payload);
   } catch (err: any) {
     logger.error(`Search failed: ${err.message}`, { query: q, page: pageNum });

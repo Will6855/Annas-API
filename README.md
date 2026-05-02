@@ -114,4 +114,28 @@ If a domain is unreachable, it is temporarily blacklisted and the next one is tr
 
 ## Environment Variables
 
-See `.env` for all configuration options.
+See `.env` for all configuration options. Key settings include:
+
+- `PORT`: Server port (default: 3000)
+- `CACHE_TYPE`: `memory` (default) or `redis`
+- `REDIS_URL`: Redis connection string (e.g. `redis://localhost:6379`)
+- `REDIS_PREFIX`: Prefix for keys in Redis (default: `annas-api:`)
+- `CACHE_TTL_SEARCH`: TTL for search results in seconds (default: 300)
+- `CACHE_TTL_BOOK`: TTL for book details in seconds (default: 3600)
+
+## Caching Options
+
+The API supports two caching engines:
+
+### 1. In-Memory (NodeCache)
+Default option. Best for single-instance deployments.
+- Set `CACHE_TYPE=memory`
+- Automatic cleanup of expired keys
+- Lightning-fast retrieval
+
+### 2. Redis
+Best for multi-instance deployments or persistent caching.
+- Set `CACHE_TYPE=redis`
+- Configure via `REDIS_URL`
+- Shared cache across multiple API nodes
+- Survives application restarts

@@ -22,7 +22,7 @@ router.get('/', async (req: Request, res: Response) => {
     uptime:  Math.round(process.uptime()) + 's',
     memory:  formatMemory(process.memoryUsage()),
     domains: domainMgr.getDomainStatus(),
-    cache:   cache.getStats(),
+    cache:   await cache.getStats(),
     browserPool: browserPool.stats(),
     timestamp: new Date().toISOString(),
   });
@@ -34,8 +34,8 @@ import { authenticate, requireRole } from '../middleware/auth';
  * DELETE /api/cache
  * Flush all cached data.
  */
-router.delete('/cache', authenticate, requireRole('admin'), (req: Request, res: Response) => {
-  cache.flush();
+router.delete('/cache', authenticate, requireRole('admin'), async (req: Request, res: Response) => {
+  await cache.flush();
   res.json({ success: true, message: 'Cache flushed successfully' });
 });
 

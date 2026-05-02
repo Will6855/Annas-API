@@ -8,10 +8,16 @@ export const config = {
   },
 
   cache: {
+    type:       (process.env.CACHE_TYPE || 'memory') as 'memory' | 'redis',
     ttlSearch:  parseInt(process.env.CACHE_TTL_SEARCH || '300',   10),
     ttlBook:    parseInt(process.env.CACHE_TTL_BOOK || '3600',     10),
     ttlRelated: parseInt(process.env.CACHE_TTL_RELATED || '3600',  10),
     ttlDomain:  parseInt(process.env.CACHE_TTL_DOMAIN || '60',   10),
+  },
+
+  redis: {
+    url: process.env.REDIS_URL || 'redis://localhost:6379',
+    prefix: process.env.REDIS_PREFIX || 'annas-api:',
   },
 
   browser: {

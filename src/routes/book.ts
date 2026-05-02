@@ -30,7 +30,7 @@ router.get('/:md5', async (req: Request, res: Response): Promise<any> => {
 
   // ── Cache check ────────────────────────────────────────────────────────────
   if (!forceRefresh) {
-    const cached = cache.getBook(md5);
+    const cached = await cache.getBook(md5);
     if (cached) {
       logger.debug(`Cache HIT [book] ${md5}`);
       return res.json({
@@ -62,7 +62,7 @@ router.get('/:md5', async (req: Request, res: Response): Promise<any> => {
       responseTime: Date.now() - start,
     };
 
-    cache.setBook(md5, payload);
+    await cache.setBook(md5, payload);
     return res.json(payload);
   } catch (err: any) {
     logger.error(`Book scrape failed: ${err.message}`, { md5 });
