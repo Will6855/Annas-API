@@ -28,77 +28,9 @@ npm run dev
 npm start
 ```
 
-## API Endpoints
+## API Documentation
 
-### `GET /api/search`
-Search for books by any query (title, author, ISBN, DOI, MD5, etc.)
-
-**Query Parameters:**
-| Param | Type | Default | Description |
-|---|---|---|---|
-| `q` | string | required | Search query |
-| `page` | number | 1 | Page number |
-| `lang` | string | — | Language filter (e.g. `en`) |
-| `ext` | string | — | File extension filter (e.g. `pdf`, `epub`) |
-| `sort` | string | — | Sort order (`newest`, `oldest`, `largest`, `smallest`) |
-| `content` | string | — | Content type filter |
-
-**Response:**
-```json
-{
-  "success": true,
-  "query": "python programming",
-  "page": 1,
-  "results": [...],
-  "cached": false,
-  "domain": "annas-archive.gl",
-  "responseTime": 1234
-}
-```
-
----
-
-### `GET /api/book/:md5`
-Get full details for a specific book by its MD5 hash.
-
-**Response:**
-```json
-{
-  "success": true,
-  "md5": "d64efd386ed7227592499460aca2044b",
-  "book": {
-    "title": "Data Science Essentials in Python",
-    "author": "Dmitry Zinoviev",
-    "publisher": "Pragmatic Bookshelf",
-    "year": "2016",
-    "language": "en",
-    "filesize": 6432380,
-    "extension": "pdf",
-    "isbn": ["9781680501841", "1680501844"],
-    "description": "...",
-    "cover": "https://...",
-    "md5": "d64efd386ed7227592499460aca2044b",
-    "downloadLinks": {
-      "fast": [...],
-      "slow": [...],
-      "external": [...]
-    },
-    "metadata": {...}
-  },
-  "cached": true,
-  "responseTime": 45
-}
-```
-
----
-
-### `GET /health`
-Returns API health, domain status, cache stats, and browser pool status.
-
----
-
-### `DELETE /api/cache`
-Clears the entire cache. Useful for forced refresh.
+The full API specification is available in [openapi.yaml](./openapi.yaml). You can visualize this file using tools like [Swagger Editor](https://editor.swagger.io/) or by installing the OpenAPI extension in your IDE.
 
 ## Mirrors / Domain Rotation
 
