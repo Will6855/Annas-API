@@ -1,0 +1,437 @@
+openapi: 3.0.3
+info:
+  title: Anna's Archive API
+  description: |
+    A RESTful API to search and retrieve book metadata from Anna's Archive.
+  version: 1.0.0
+  contact:
+    name: API Support
+servers:
+  - url: http://localhost:3000
+    description: Local development server
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        username:
+          type: string
+        role:
+          type: string
+          enum: [user, admin]
+        createdAt:
+          type: string
+          format: date-time
+
+    BookSummary:
+      type: object
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        md5:
+          type: string
+        language:
+          type: string
+        extension:
+          type: string
+        size:
+          type: string
+        publisher:
+          type: string
+        year:
+          type: string
+
+    BookDetail:
+      type: object
+      properties:
+        title:
+          type: string
+        author:
+          type: string
+        description:
+          type: string
+        language:
+          type: string
+        extension:
+          type: string
+        size:
+          type: string
+        publisher:
+          type: string
+        year:
+          type: string
+        pages:
+          type: string
+        image:
+          type: string
+        downloadUrls:
+          type: array
+          items:
+            type: object
+            properties:
+              label:
+                type: string
+              url:
+                type: string
+
+    ErrorResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: false
+        error:
+          type: string
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: User login
+      description: Exchange credentials for a JWT token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  token:
+                    type: string
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: Admin only. Create a new user account.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                role:
+                  type: string
+                  enum: [user, admin]
+                  default: user
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+        '403':
+          description: Forbidden (Admin role required)
+
+  /api/auth/users:
+    get:
+      tags: [Auth]
+      summary: List all users
+      description: Admin only. Retrieve a list of all registered users.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  users:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/User'
+
+  /api/auth/users/{id}:
+    put:
+      tags: [Auth]
+      summary: Update a user
+      description: Admin only. Update username, password, or role of an existing user.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+                role:
+                  type: string
+                  enum: [user, admin]
+      responses:
+        '200':
+          description: User updated
+        '404':
+          description: User not found
+
+  /api/search:
+    get:
+      tags: [Search]
+      summary: Search for books
+      description: Search Anna's Archive with filters.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Search query string
+          schema:
+            type: string
+        - name: page
+          in: query
+          description: Page number
+          schema:
+            type: integer
+            default: 1
+        - name: lang
+          in: query
+          description: Language filter (e.g., "en")
+          schema:
+            type: string
+        - name: ext
+          in: query
+          description: File extension filter (e.g., "pdf")
+          schema:
+            type: string
+        - name: sort
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [newest, oldest, largest, smallest]
+        - name: content
+          in: query
+          description: Content type filter
+          schema:
+            type: string
+            enum: [book_any, book_fiction, book_nonfiction, magazine, standards_document, comics, other]
+        - name: index
+          in: query
+          description: Source index filter
+          schema:
+            type: string
+            enum: [journals, digital_lending, meta]
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  query:
+                    type: string
+                  results:
+                    type: object
+                    properties:
+                      primary:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BookSummary'
+                      partial:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/BookSummary'
+                  cached:
+                    type: boolean
+                  responseTime:
+                    type: integer
+
+  /api/book/{md5}:
+    get:
+      tags: [Book]
+      summary: Get book details
+      description: Fetch full metadata and download links for a specific book.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: md5
+          in: path
+          required: true
+          description: 32-character MD5 hash of the book
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{32}$'
+        - name: refresh
+          in: query
+          description: Bypass cache and force a fresh scrape
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Book details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  book:
+                    $ref: '#/components/schemas/BookDetail'
+                  cached:
+                    type: boolean
+        '404':
+          description: Book not found
+
+  /api/book/{md5}/related:
+    get:
+      tags: [Book]
+      summary: Get related books
+      description: Fetch similar books based on author, tags, and title keywords.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: md5
+          in: path
+          required: true
+          description: 32-character MD5 hash of the source book
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{32}$'
+        - name: limit
+          in: query
+          description: Max results (1-50)
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+        - name: lang
+          in: query
+          description: Override language filter
+          schema:
+            type: string
+        - name: ext
+          in: query
+          description: Restrict to file extension
+          schema:
+            type: string
+        - name: refresh
+          in: query
+          description: Bypass cache
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: List of related books
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/BookSummary'
+
+  /health:
+    get:
+      tags: [System]
+      summary: API Health status
+      description: Returns uptime, memory usage, domain status, and cache statistics.
+      responses:
+        '200':
+          description: System health info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  status:
+                    type: string
+                  uptime:
+                    type: string
+                  timestamp:
+                    type: string
+
+  /api/cache:
+    delete:
+      tags: [System]
+      summary: Flush API cache
+      description: Admin only. Clear all cached search and book data.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Cache cleared successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
