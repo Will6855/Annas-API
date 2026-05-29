@@ -4,6 +4,7 @@ dotenv.config();
 
 import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
+import cors from 'cors';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { config } from './config';
@@ -14,7 +15,7 @@ import * as browserPool from './browserPool';
 import searchRouter from './routes/search';
 import bookRouter from './routes/book';
 import relatedRouter from './routes/related';
-import healthRouter from './routes/health';
+import healthRouter, { refreshHealthData, HEALTH_CACHE_INTERVAL } from './routes/health';
 import authRouter from './routes/auth';
 import { initializeDatabase } from './db';
 
@@ -22,6 +23,7 @@ const app = express();
 
 // ── Security & Middleware ──────────────────────────────────────────────────────
 app.use(helmet());
+app.use(cors());
 app.use(express.json());
 
 // HTTP access logs (skip health endpoint spam)
@@ -67,6 +69,7 @@ app.get('/', (req: Request, res: Response) => {
     endpoints: {
       search: 'GET /api/search?q=<query>&page=<n>&lang=<lang>&ext=<ext>&sort=<sort>',
       book:   'GET /api/book/:md5',
+      download: 'GET /api/book/:md5/download?source=slow|libgen',
       related: 'GET /api/book/:md5/related?limit=<n>',
       health: 'GET /health',
       cache:  'DELETE /api/cache',
@@ -91,11 +94,21 @@ const PORT = config.server.port;
 
 app.listen(PORT, async () => {
   await initializeDatabase();
+  await browserPool.initializeBrowserPool();
   logger.info(`🚀 Anna's Archive API running on http://localhost:${PORT}`);
   logger.info(`📋 Environment: ${config.server.env}`);
   logger.info(`🌐 Domain rotation: ${config.domains.join(' → ')}`);
   logger.info(`🗄️  Cache TTL: search=${config.cache.ttlSearch}s  book=${config.cache.ttlBook}s`);
   logger.info(`🏊 Browser pool size: ${config.browser.poolSize}`);
+
+  // Initialize health data and set up background refresh every 10 minutes
+  await refreshHealthData();
+  setInterval(() => {
+    refreshHealthData().catch(err => {
+      logger.error('Health data refresh failed:', err);
+    });
+  }, HEALTH_CACHE_INTERVAL);
+  logger.info(`💚 Health endpoint caching: ${HEALTH_CACHE_INTERVAL / 1000 / 60}min interval`);
 });
 
 // ── Graceful shutdown ─────────────────────────────────────────────────────────

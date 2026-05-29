@@ -1,11 +1,6 @@
-import { chromium } from 'playwright-extra';
 import type { Browser } from 'playwright';
-import stealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { config } from './config';
 import { logger } from './logger';
-
-// @ts-ignore - The types for playwright-extra aren't perfect
-chromium.use(stealthPlugin());
 
 interface BrowserInstance {
   browser: Browser;
@@ -19,21 +14,37 @@ const waitingQueue: Array<(b: BrowserInstance) => void> = [];
 let idleTimer: NodeJS.Timeout | null = null;
 let isShuttingDown = false;
 
+let launchFn: ((opts: any) => Promise<Browser>) | null = null;
+
+/**
+ * Initialize CloakBrowser launcher using dynamic import
+ */
+export async function initializeBrowserPool() {
+  try {
+    logger.info('Initializing CloakBrowser...');
+    // @ts-ignore - Dynamic import for ES module
+    const { launch } = await import('cloakbrowser');
+    launchFn = launch;
+    logger.info('✓ CloakBrowser initialized successfully');
+    return true;
+  } catch (err: any) {
+    logger.error(`Failed to initialize CloakBrowser: ${err.message}`);
+    throw err;
+  }
+}
+
 /**
  * Launch a new browser instance
  */
 async function launchBrowser(): Promise<BrowserInstance> {
-  logger.info(`Launching new browser (pool size: ${pool.length}/${config.browser.poolSize})`);
-  
-  const browser = await chromium.launch({
+  if (!launchFn) {
+    throw new Error('Browser pool not initialized. Call initializeBrowserPool() first.');
+  }
+
+  logger.info(`Launching browser (pool: ${pool.length}/${config.browser.poolSize})`);
+
+  const browser = await launchFn({
     headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-web-security',
-      '--disable-dev-shm-usage',
-    ],
   });
 
   const instance: BrowserInstance = { browser, lastUsed: Date.now() };
@@ -53,6 +64,10 @@ async function launchBrowser(): Promise<BrowserInstance> {
  * Acquire a browser from the pool, waiting if all are currently in use.
  */
 export async function acquire(): Promise<Browser> {
+  // Auto-initialize if not done yet
+  if (!launchFn) {
+    await initializeBrowserPool();
+  }
   // Wait if pool is full and everything is busy
   if (pool.length >= config.browser.poolSize && pool.length <= inUseCount) {
     return new Promise<Browser>((resolve) => {

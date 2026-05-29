@@ -95,6 +95,32 @@ components:
         error:
           type: string
 
+    LinkStatus:
+      type: object
+      properties:
+        label:
+          type: string
+          description: Display label for the link
+        url:
+          type: string
+          description: The download URL
+
+    BookDownloadLinks:
+      type: object
+      properties:
+        fast:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkStatus'
+        slow:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkStatus'
+        external:
+          type: array
+          items:
+            $ref: '#/components/schemas/LinkStatus'
+
 paths:
   /api/auth/login:
     post:
@@ -394,11 +420,90 @@ paths:
                     items:
                       $ref: '#/components/schemas/BookSummary'
 
+  /api/book/{md5}/download:
+    get:
+      tags: [Book]
+      summary: Download a book
+      description: |
+        Download a book file from Anna's Archive or external mirrors.
+        For slow downloads, the server automatically tries all available links until one succeeds.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: md5
+          in: path
+          required: true
+          description: 32-character MD5 hash of the book
+          schema:
+            type: string
+            pattern: '^[a-f0-9]{32}$'
+        - name: source
+          in: query
+          description: |
+            Download source. "libgen" uses external Libgen mirrors (default).
+            "slow" uses Anna's Archive slow servers (tries all links until success).
+          schema:
+            type: string
+            enum: [slow, libgen]
+            default: libgen
+        - name: refresh
+          in: query
+          description: Bypass cache and force a fresh metadata scrape before downloading
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: File download stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '400':
+          description: Invalid MD5 or source parameter
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Book not found or no download links available for the requested source
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+                  md5:
+                    type: string
+                  source:
+                    type: string
+        '502':
+          description: Download failed (all links exhausted or streaming error)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  error:
+                    type: string
+                  md5:
+                    type: string
+                  source:
+                    type: string
+
   /health:
     get:
       tags: [System]
       summary: API Health status
-      description: Returns uptime, memory usage, domain status, and cache statistics.
+      description: |
+        Returns system health info: uptime, memory usage, domain status, cache statistics, and browser pool state.
+        Health data is cached and only refreshed every 10 minutes server-side, but uptime and domain blacklist timers are recalculated per request.
       responses:
         '200':
           description: System health info
@@ -409,12 +514,78 @@ paths:
                 properties:
                   success:
                     type: boolean
+                    example: true
                   status:
                     type: string
+                    example: ok
                   uptime:
                     type: string
+                    description: Server uptime (recalculated per request)
+                    example: 3600s
+                  memory:
+                    type: object
+                    properties:
+                      rss:
+                        type: string
+                        example: 150.5 MB
+                      heapUsed:
+                        type: string
+                        example: 80.2 MB
+                      heapTotal:
+                        type: string
+                        example: 120.0 MB
+                      external:
+                        type: string
+                        example: 5.3 MB
+                  domains:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        domain:
+                          type: string
+                          example: annas-archive.org
+                        status:
+                          type: string
+                          enum: [healthy, down, blacklisted]
+                        blacklistedFor:
+                          type: string
+                          nullable: true
+                          description: Countdown to unban (null if not blacklisted, recalculated per request)
+                          example: 245s
+                        lastChecked:
+                          type: string
+                          format: date-time
+                          nullable: true
+                        lastError:
+                          type: string
+                          nullable: true
+                  cache:
+                    type: object
+                    properties:
+                      size:
+                        type: integer
+                      keys:
+                        type: integer
+                  browserPool:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      available:
+                        type: integer
+                  lastActualized:
+                    type: string
+                    format: date-time
+                    description: When domain status and cache stats were last refreshed (cached for 10 min)
+                  timeUntilNextUpdate:
+                    type: string
+                    description: Seconds until next 10-minute refresh
+                    example: 467s
                   timestamp:
                     type: string
+                    format: date-time
+                    description: Current server timestamp
 
   /api/cache:
     delete:

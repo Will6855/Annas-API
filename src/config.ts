@@ -12,7 +12,7 @@ export const config = {
     ttlSearch:  parseInt(process.env.CACHE_TTL_SEARCH || '300',   10),
     ttlBook:    parseInt(process.env.CACHE_TTL_BOOK || '3600',     10),
     ttlRelated: parseInt(process.env.CACHE_TTL_RELATED || '3600',  10),
-    ttlDomain:  parseInt(process.env.CACHE_TTL_DOMAIN || '60',   10),
+    ttlDomain:  parseInt(process.env.CACHE_TTL_DOMAIN || '600',   10),
   },
 
   redis: {
