@@ -6,6 +6,9 @@ import { refreshDomainStatus } from '../scraper/core';
 
 const router = express.Router();
 
+// Recorded once at server startup
+export const serverStartTime = new Date();
+
 // Health data cache (10-minute refresh interval)
 export const HEALTH_CACHE_INTERVAL = 10 * 60 * 1000; // 10 minutes in milliseconds
 interface CachedHealth {
@@ -30,7 +33,6 @@ export async function refreshHealthData() {
         success: true,
         status: 'ok',
         uptime: Math.round(process.uptime()) + 's',
-        memory: formatMemory(process.memoryUsage()),
         domains: domainMgr.getDomainStatus(),
         cache: stats,
         browserPool: browserPool.stats(),
@@ -65,11 +67,16 @@ router.get('/', async (req: Request, res: Response) => {
   // Recalculate dynamic values on each request
   const updatedUptime = Math.round(process.uptime()) + 's';
   const domainsWithFreshTimestamps = domainMgr.getDomainStatus(); // Refreshes blacklistedFor countdown
+  const freshCacheStats = await cache.getStats();
+  const freshMemory = formatMemory(process.memoryUsage());
 
   res.json({
     ...healthCache.data,
     uptime: updatedUptime,
     domains: domainsWithFreshTimestamps,
+    cache: freshCacheStats,
+    memory: freshMemory,
+    serverStartTime: serverStartTime.toISOString(),
     lastActualized: healthCache.lastActualized.toISOString(),
     timeUntilNextUpdate: Math.round(timeUntilNextUpdate / 1000) + 's',
     timestamp: now.toISOString(),

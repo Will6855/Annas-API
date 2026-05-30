@@ -15,6 +15,16 @@ export async function scrapeSearch(query: string, page = 1, filters: SearchFilte
     if (filters.sort) params.set('sort', filters.sort);
     if (filters.content) params.set('content', filters.content);
     if (filters.index) params.set('index', filters.index);
+    
+    // Add advanced search fields
+    if (filters.advancedSearch && filters.advancedSearch.length > 0) {
+      filters.advancedSearch.forEach((field, index) => {
+        const fieldNum = index + 1;
+        if (field.termtype) params.set(`termtype_${fieldNum}`, field.termtype);
+        if (field.term) params.set(`term_${fieldNum}`, field.term);
+      });
+    }
+    
     return `https://${d}/search?${params.toString()}`;
   });
 

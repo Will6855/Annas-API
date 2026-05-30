@@ -36,7 +36,7 @@ export const config = {
     max:      parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
   },
 
-  domains: (process.env.ROTATION_DOMAINS || 'annas-archive.gl,annas-archive.org,annas-archive.se,annas-archive.gs,annas-archive.gd,annas-archive.pk')
+  domains: (process.env.ROTATION_DOMAINS || 'annas-archive.gl,annas-archive.org,annas-archive.se,annas-archive.gd,annas-archive.pk')
     .split(',')
     .map(d => d.trim())
     .filter(Boolean),

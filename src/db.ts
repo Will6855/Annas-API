@@ -14,7 +14,7 @@ const dbConfig: DataSourceOptions = isProd
       entities: [User],
     }
   : {
-      type: 'sqlite',
+      type: 'better-sqlite3',
       database: 'dev.sqlite',
       synchronize: true,
       logging: false,

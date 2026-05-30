@@ -51,12 +51,19 @@ export interface BookDetail extends SearchResult {
   metadata: BookMetadata;
 }
 
+export interface AdvancedSearchField {
+  termtype?: string | null; // title, author, publisher, edition_varia, year, original_filename, description_comments
+  term?: string | null;
+}
+
 export interface SearchFilters {
   lang?: string | null;
   ext?: string | null;
-  sort?: string | null;
+  sort?: string | null; // most_relevant, newest, oldest, largest, smallest, newest_added, oldest_added, random
   content?: string | null;
   index?: string | null;
+  // Advanced search fields
+  advancedSearch?: AdvancedSearchField[];
 }
 
 export interface ScrapeSearchResponse {

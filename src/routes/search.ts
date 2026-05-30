@@ -10,16 +10,17 @@ const router = express.Router();
  * GET /api/search
  *
  * Query params:
- *   q        {string}  required  - Search query
- *   page     {number}  default 1
- *   lang     {string}  optional  - e.g. "en"
- *   ext      {string}  optional  - e.g. "pdf"
- *   sort     {string}  optional  - newest|oldest|largest|smallest
- *   content  {string}  optional  - book_any|book_fiction|book_nonfiction|magazine|standards_document|comics|other
- *   index    {string}  optional  - journals|digital_lending|meta
+ *   q                 {string}  required  - Search query
+ *   page              {number}  default 1
+ *   lang              {string}  optional  - e.g. "en"
+ *   ext               {string}  optional  - e.g. "pdf"
+ *   sort              {string}  optional  - most_relevant|newest|oldest|largest|smallest|newest_added|oldest_added|random
+ *   content           {string}  optional  - book_any|book_fiction|book_nonfiction|magazine|standards_document|comics|other
+ *   index             {string}  optional  - journals|digital_lending|meta
+ *   termtype_N        {string}  optional  - Advanced search field type (title|author|publisher|edition_varia|year|original_filename|description_comments)
+ *   term_N            {string}  optional  - Advanced search field value (N = 1, 2, 3, ...)
  */
 router.get('/', async (req: Request, res: Response): Promise<any> => {
-  const q = req.query.q as string;
   const page = req.query.page as string | undefined;
   const lang = req.query.lang as string | undefined;
   const ext = req.query.ext as string | undefined;
@@ -27,15 +28,37 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   const content = req.query.content as string | undefined;
   const index = req.query.index as string | undefined;
 
-  if (!q || !q.trim()) {
-    return res.status(400).json({
-      success: false,
-      error: 'Query parameter "q" is required',
-    });
+  const q = (req.query.q as string) || '';
+
+  // Extract advanced search fields from query params (termtype_1, term_1, termtype_2, term_2, ...)
+  const advancedSearch: Array<{ termtype?: string | null; term?: string | null }> = [];
+  let fieldIndex = 1;
+  while (true) {
+    const termtype = req.query[`termtype_${fieldIndex}`] as string | undefined;
+    const term = req.query[`term_${fieldIndex}`] as string | undefined;
+
+    // Stop if no more fields
+    if (!termtype && !term) break;
+
+    // Add field if it has either termtype or term
+    if (termtype || term) {
+      advancedSearch.push({
+        termtype: termtype || null,
+        term: term || null,
+      });
+    }
+    fieldIndex++;
   }
 
   const pageNum = Math.max(1, parseInt(page || '1', 10));
-  const filters: SearchFilters = { lang, ext, sort, content, index };
+  const filters: SearchFilters = { 
+    lang, 
+    ext, 
+    sort, 
+    content, 
+    index,
+    ...(advancedSearch.length > 0 && { advancedSearch }),
+  };
 
   const start = Date.now();
 

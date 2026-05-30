@@ -374,18 +374,21 @@ async function tryLibgenDownloadLinks(externalLinks: Array<{ label: string; url:
 /**
  * GET /api/book/:md5/download
  *
- * Download a book using fast/slow links or external (libgen) links.
+ * Download a book with automatic fallback:
+ *   - "auto"   (default): tries libgen first, falls back to slow if libgen fails
+ *   - "libgen"           : libgen links only
+ *   - "slow"             : slow download links only
  *
  * Params:
  *   md5  {string}  - 32-character MD5 hash
  *
  * Query params:
- *   source  {string}  - "libgen" (default) or "slow"
+ *   source  {string}  - "auto" (default), "libgen", or "slow"
  *   refresh {boolean} - If "true", bypass cache and force fresh scrape
  */
 router.get('/:md5/download', async (req: Request, res: Response): Promise<any> => {
   const md5 = req.params.md5 as string;
-  const source = (req.query.source as string || 'libgen').toLowerCase();
+  const source = (req.query.source as string || 'auto').toLowerCase();
   const forceRefresh = req.query.refresh === 'true';
 
   // Validate MD5 format
@@ -397,10 +400,10 @@ router.get('/:md5/download', async (req: Request, res: Response): Promise<any> =
   }
 
   // Validate source parameter
-  if (!['slow', 'libgen'].includes(source)) {
+  if (!['auto', 'slow', 'libgen'].includes(source)) {
     return res.status(400).json({
       success: false,
-      error: 'Invalid source. Must be "slow" or "libgen".',
+      error: 'Invalid source. Must be "auto", "slow", or "libgen".',
     });
   }
 
@@ -434,6 +437,7 @@ router.get('/:md5/download', async (req: Request, res: Response): Promise<any> =
 
     // ── Select download links based on source ──────────────────────────────────
     let downloadResult: { url: string; statusCode: number; headers: any; stream: NodeJS.ReadableStream };
+    let usedSource = source;
 
     if (source === 'slow') {
       const slowLinks = book.downloadLinks.slow || [];
@@ -449,7 +453,7 @@ router.get('/:md5/download', async (req: Request, res: Response): Promise<any> =
 
       logger.info(`Starting slow download for ${md5} (${slowLinks.length} links available)`);
       downloadResult = await trySlowDownloadLinks(slowLinks);
-      
+
     } else if (source === 'libgen') {
       // Filter external links for libgen ads pages (must contain /ads.php)
       const externalLinks = book.downloadLinks.external || [];
@@ -468,11 +472,51 @@ router.get('/:md5/download', async (req: Request, res: Response): Promise<any> =
 
       logger.info(`Starting libgen download for ${md5} (${libgenLinks.length} ads pages available)`);
       downloadResult = await tryLibgenDownloadLinks(libgenLinks);
+
     } else {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid source. Must be "slow" or "libgen".',
-      });
+      // ── "auto" mode: try libgen first, fallback to slow ──────────────────────
+      usedSource = 'auto';
+      const externalLinks = book.downloadLinks.external || [];
+      const libgenLinks = externalLinks.filter(
+        (link: { label: string; url: string }) => link.url.includes('/ads.php')
+      );
+      const slowLinks = book.downloadLinks.slow || [];
+
+      // Try libgen first
+      if (libgenLinks.length > 0) {
+        logger.info(`Auto download for ${md5}: trying libgen first (${libgenLinks.length} ads pages available)`);
+        try {
+          downloadResult = await tryLibgenDownloadLinks(libgenLinks);
+          logger.info(`Auto download for ${md5}: libgen succeeded`);
+        } catch (libgenErr: any) {
+          logger.warn(`Auto download for ${md5}: libgen failed (${libgenErr.message}), falling back to slow links`);
+
+          if (slowLinks.length === 0) {
+            return res.status(404).json({
+              success: false,
+              error: `Libgen failed and no slow links available: ${libgenErr.message}`,
+              md5,
+              source: 'auto',
+              fallbackAttempted: true,
+            });
+          }
+
+          logger.info(`Auto download for ${md5}: trying slow links (${slowLinks.length} links available)`);
+          downloadResult = await trySlowDownloadLinks(slowLinks);
+          logger.info(`Auto download for ${md5}: slow fallback succeeded`);
+        }
+      } else if (slowLinks.length > 0) {
+        // No libgen links, try slow directly
+        logger.info(`Auto download for ${md5}: no libgen links, using slow links directly`);
+        downloadResult = await trySlowDownloadLinks(slowLinks);
+      } else {
+        return res.status(404).json({
+          success: false,
+          error: 'No libgen or slow download links available for this book.',
+          md5,
+          source: 'auto',
+        });
+      }
     }
 
     // ── Set response headers for file download ─────────────────────────────────
@@ -485,7 +529,7 @@ router.get('/:md5/download', async (req: Request, res: Response): Promise<any> =
     downloadResult.stream.pipe(res);
 
     downloadResult.stream.on('error', (err: any) => {
-      logger.error(`Stream error during download: ${err.message}`, { md5, source });
+      logger.error(`Stream error during download: ${err.message}`, { md5, source: usedSource });
       if (!res.headersSent) {
         res.status(502).json({
           success: false,

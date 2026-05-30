@@ -36,55 +36,136 @@ components:
     BookSummary:
       type: object
       properties:
-        title:
-          type: string
-        author:
-          type: string
         md5:
           type: string
-        language:
+          description: 32-character MD5 hash
+        title:
           type: string
-        extension:
+          nullable: true
+        author:
           type: string
-        size:
-          type: string
+          nullable: true
         publisher:
           type: string
+          nullable: true
         year:
           type: string
+          nullable: true
+        language:
+          type: string
+          nullable: true
+        extension:
+          type: string
+          nullable: true
+        filesize:
+          type: string
+          nullable: true
+          description: Human-readable filesize (e.g. "0.6 MB")
+        description:
+          type: string
+          nullable: true
+        cover:
+          type: string
+          nullable: true
+          description: Cover image URL
+        filename:
+          type: string
+          nullable: true
+        downloads:
+          type: integer
+          nullable: true
+        lists:
+          type: integer
+          nullable: true
+        bookType:
+          type: string
+          nullable: true
+          description: Content category (e.g. "Book (fiction)")
+        hasIssues:
+          type: boolean
+        url:
+          type: string
+          description: Full URL to the book detail page
 
     BookDetail:
       type: object
       properties:
+        md5:
+          type: string
+          description: 32-character MD5 hash
         title:
           type: string
+          nullable: true
         author:
           type: string
-        description:
-          type: string
-        language:
-          type: string
-        extension:
-          type: string
-        size:
-          type: string
+          nullable: true
         publisher:
           type: string
+          nullable: true
         year:
           type: string
-        pages:
+          nullable: true
+        language:
           type: string
-        image:
+          nullable: true
+        extension:
           type: string
-        downloadUrls:
+          nullable: true
+        filesize:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        cover:
+          type: string
+          nullable: true
+        collections:
           type: array
           items:
-            type: object
-            properties:
-              label:
-                type: string
-              url:
-                type: string
+            type: string
+        contentType:
+          type: string
+          nullable: true
+        zlibId:
+          type: string
+          nullable: true
+        isbn:
+          type: array
+          items:
+            type: string
+        ipfsCids:
+          type: array
+          items:
+            type: string
+        filepaths:
+          type: array
+          items:
+            type: string
+        url:
+          type: string
+        downloadLinks:
+          $ref: '#/components/schemas/BookDownloadLinks'
+        metadata:
+          type: object
+          description: Variable key-value metadata bag. Keys are dynamic (e.g. sha256, asin, series, dates, identifiers, etc.)
+          additionalProperties: true
+
+    BookResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        md5:
+          type: string
+        book:
+          $ref: '#/components/schemas/BookDetail'
+        domain:
+          type: string
+        cached:
+          type: boolean
+        responseTime:
+          type: integer
 
     ErrorResponse:
       type: object
@@ -256,14 +337,13 @@ paths:
     get:
       tags: [Search]
       summary: Search for books
-      description: Search Anna's Archive with filters.
+      description: Search Anna's Archive with filters and advanced search options.
       security:
         - BearerAuth: []
       parameters:
         - name: q
           in: query
-          required: true
-          description: Search query string
+          description: Search query string (optional — blank searches are allowed)
           schema:
             type: string
         - name: page
@@ -284,10 +364,11 @@ paths:
             type: string
         - name: sort
           in: query
-          description: Sort order
+          description: Sort order for results
           schema:
             type: string
-            enum: [newest, oldest, largest, smallest]
+            enum: [most_relevant, newest, oldest, largest, smallest, newest_added, oldest_added, random]
+            default: most_relevant
         - name: content
           in: query
           description: Content type filter
@@ -300,6 +381,39 @@ paths:
           schema:
             type: string
             enum: [journals, digital_lending, meta]
+        - name: termtype_1
+          in: query
+          description: First advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: term_1
+          in: query
+          description: First advanced search field value
+          schema:
+            type: string
+        - name: termtype_2
+          in: query
+          description: Second advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: term_2
+          in: query
+          description: Second advanced search field value
+          schema:
+            type: string
+        - name: termtype_3
+          in: query
+          description: Third advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: term_3
+          in: query
+          description: Third advanced search field value
+          schema:
+            type: string
       responses:
         '200':
           description: Search results
@@ -312,6 +426,13 @@ paths:
                     type: boolean
                   query:
                     type: string
+                  page:
+                    type: integer
+                  count:
+                    type: integer
+                  filters:
+                    type: object
+                    description: Active filters (including advanced search fields if provided)
                   results:
                     type: object
                     properties:
@@ -355,14 +476,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  book:
-                    $ref: '#/components/schemas/BookDetail'
-                  cached:
-                    type: boolean
+                $ref: '#/components/schemas/BookResponse'
         '404':
           description: Book not found
 
@@ -425,8 +539,9 @@ paths:
       tags: [Book]
       summary: Download a book
       description: |
-        Download a book file from Anna's Archive or external mirrors.
-        For slow downloads, the server automatically tries all available links until one succeeds.
+        Download a book file. The default "auto" mode tries Libgen mirrors first
+        and automatically falls back to slow servers if Libgen fails.
+        "libgen" forces Libgen-only (no fallback) and "slow" forces slow servers.
       security:
         - BearerAuth: []
       parameters:
@@ -440,12 +555,14 @@ paths:
         - name: source
           in: query
           description: |
-            Download source. "libgen" uses external Libgen mirrors (default).
-            "slow" uses Anna's Archive slow servers (tries all links until success).
+            Download source strategy. "auto" (default) tries libgen first, 
+            then falls back to slow servers if libgen fails.
+            "libgen" uses external Libgen mirrors only.
+            "slow" uses Anna's Archive slow servers only (tries all links until success).
           schema:
             type: string
-            enum: [slow, libgen]
-            default: libgen
+            enum: [auto, slow, libgen]
+            default: auto
         - name: refresh
           in: query
           description: Bypass cache and force a fresh metadata scrape before downloading
@@ -503,7 +620,7 @@ paths:
       summary: API Health status
       description: |
         Returns system health info: uptime, memory usage, domain status, cache statistics, and browser pool state.
-        Health data is cached and only refreshed every 10 minutes server-side, but uptime and domain blacklist timers are recalculated per request.
+        Domain status is cached and only refreshed every 10 minutes server-side. Uptime, memory, cache stats, and domain blacklist timers are live per request.
       responses:
         '200':
           description: System health info
@@ -522,8 +639,14 @@ paths:
                     type: string
                     description: Server uptime (recalculated per request)
                     example: 3600s
+                  serverStartTime:
+                    type: string
+                    format: date-time
+                    description: ISO timestamp of when the server was started (recorded at module load)
+                    example: "2026-05-30T12:00:00.000Z"
                   memory:
                     type: object
+                    description: Live memory usage (recalculated per request)
                     properties:
                       rss:
                         type: string
@@ -562,10 +685,41 @@ paths:
                           nullable: true
                   cache:
                     type: object
+                    description: Live cache statistics (recalculated per request)
                     properties:
-                      size:
+                      type:
+                        type: string
+                        example: memory
+                      search:
+                        type: object
+                        properties:
+                          keys:
+                            type: integer
+                          hits:
+                            type: integer
+                          misses:
+                            type: integer
+                      book:
+                        type: object
+                        properties:
+                          keys:
+                            type: integer
+                          hits:
+                            type: integer
+                          misses:
+                            type: integer
+                      related:
+                        type: object
+                        properties:
+                          keys:
+                            type: integer
+                          hits:
+                            type: integer
+                          misses:
+                            type: integer
+                      totalHits:
                         type: integer
-                      keys:
+                      totalMisses:
                         type: integer
                   browserPool:
                     type: object
@@ -574,10 +728,14 @@ paths:
                         type: integer
                       available:
                         type: integer
+                      inUse:
+                        type: integer
+                      waiting:
+                        type: integer
                   lastActualized:
                     type: string
                     format: date-time
-                    description: When domain status and cache stats were last refreshed (cached for 10 min)
+                    description: When domain status was last refreshed (every 10 min)
                   timeUntilNextUpdate:
                     type: string
                     description: Seconds until next 10-minute refresh
