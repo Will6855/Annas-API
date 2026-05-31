@@ -31,8 +31,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
   const q = (req.query.q as string) || '';
 
   // Extract advanced search fields from query params (termtype_1, termval_1, termtype_2, termval_2, ...)
-  // Extract advanced search fields from query params (termtype_1, termval_1, termtype_2, termval_2, ...)
-  const advancedSearch: Array<{ termtype?: string | null; term?: string | null }> = [];
+  const advancedSearch: Array<{ termtype?: string | null; termval?: string | null }> = [];
   let fieldIndex = 1;
   while (true) {
     const termtype = req.query[`termtype_${fieldIndex}`] as string | undefined;
@@ -45,7 +44,7 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
     if (termtype || term) {
       advancedSearch.push({
         termtype: termtype || null,
-        term: term || null,
+        termval: term || null,
       });
     }
     fieldIndex++;

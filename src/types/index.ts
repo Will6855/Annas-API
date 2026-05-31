@@ -53,7 +53,7 @@ export interface BookDetail extends SearchResult {
 
 export interface AdvancedSearchField {
   termtype?: string | null; // title, author, publisher, edition_varia, year, original_filename, description_comments
-  term?: string | null;
+  termval?: string | null;
 }
 
 export interface SearchFilters {
