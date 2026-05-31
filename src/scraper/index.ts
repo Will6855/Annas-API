@@ -21,7 +21,7 @@ export async function scrapeSearch(query: string, page = 1, filters: SearchFilte
       filters.advancedSearch.forEach((field, index) => {
         const fieldNum = index + 1;
         if (field.termtype) params.set(`termtype_${fieldNum}`, field.termtype);
-        if (field.term) params.set(`term_${fieldNum}`, field.term);
+        if (field.term) params.set(`termval_${fieldNum}`, field.term);
       });
     }
     

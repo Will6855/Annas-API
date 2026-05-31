@@ -32,6 +32,42 @@ components:
         createdAt:
           type: string
           format: date-time
+        rateLimitBookDetail:
+          type: integer
+          description: Max requests per minute for /api/book/:md5 (book detail). -1 = unlimited, 0 = blocked.
+          default: -1
+        rateLimitBookDownload:
+          type: integer
+          description: Max requests per minute for /api/book/:md5/download. -1 = unlimited, 0 = blocked.
+          default: -1
+        rateLimitBookRelated:
+          type: integer
+          description: Max requests per minute for /api/book/:md5/related. -1 = unlimited, 0 = blocked.
+          default: -1
+        rateLimitSearch:
+          type: integer
+          description: Max requests per minute for /api/search. -1 = unlimited, 0 = blocked.
+          default: -1
+
+    ApiUsageRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        endpoint:
+          type: string
+        method:
+          type: string
+        ip:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
 
     BookSummary:
       type: object
@@ -327,9 +363,180 @@ paths:
                 role:
                   type: string
                   enum: [user, admin]
+                rateLimitBookDetail:
+                  type: integer
+                  description: Max requests per minute for /api/book/:md5. -1 = unlimited, 0 = blocked.
+                rateLimitBookDownload:
+                  type: integer
+                  description: Max requests per minute for /api/book/:md5/download. -1 = unlimited, 0 = blocked.
+                rateLimitBookRelated:
+                  type: integer
+                  description: Max requests per minute for /api/book/:md5/related. -1 = unlimited, 0 = blocked.
+                rateLimitSearch:
+                  type: integer
+                  description: Max requests per minute for /api/search. -1 = unlimited, 0 = blocked.
       responses:
         '200':
           description: User updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+        '404':
+          description: User not found
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: View own account
+      description: Retrieve your own account details and current rate limit usage progress.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Account details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+                  rateLimits:
+                    type: object
+                    properties:
+                      bookDetail:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+                      bookDownload:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+                      bookRelated:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+                      search:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+        '401':
+          description: Unauthorized
+
+  /api/auth/users/{id}/usage:
+    get:
+      tags: [Auth]
+      summary: View user API usage
+      description: Admin only. Retrieve paginated API usage records and current rate limit usage for a specific user.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          description: Max records to return (max 500)
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 500
+        - name: offset
+          in: query
+          description: Number of records to skip
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+      responses:
+        '200':
+          description: Usage records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  user:
+                    $ref: '#/components/schemas/User'
+                  rateLimits:
+                    type: object
+                    properties:
+                      bookDetail:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+                      bookDownload:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+                      bookRelated:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+                      search:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                            nullable: true
+                          current:
+                            type: integer
+                  usage:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      limit:
+                        type: integer
+                      offset:
+                        type: integer
+                      records:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/ApiUsageRecord'
+        '403':
+          description: Forbidden (Admin role required)
         '404':
           description: User not found
 
@@ -387,7 +594,7 @@ paths:
           schema:
             type: string
             enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
-        - name: term_1
+        - name: termval_1
           in: query
           description: First advanced search field value
           schema:
@@ -398,7 +605,7 @@ paths:
           schema:
             type: string
             enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
-        - name: term_2
+        - name: termval_2
           in: query
           description: Second advanced search field value
           schema:
@@ -409,9 +616,75 @@ paths:
           schema:
             type: string
             enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
-        - name: term_3
+        - name: termval_3
           in: query
           description: Third advanced search field value
+          schema:
+            type: string
+        - name: termtype_4
+          in: query
+          description: Fourth advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: termval_4
+          in: query
+          description: Fourth advanced search field value
+          schema:
+            type: string
+        - name: termtype_5
+          in: query
+          description: Fifth advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: termval_5
+          in: query
+          description: Fifth advanced search field value
+          schema:
+            type: string
+        - name: termtype_6
+          in: query
+          description: Sixth advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: termval_6
+          in: query
+          description: Sixth advanced search field value
+          schema:
+            type: string
+        - name: termtype_7
+          in: query
+          description: Seventh advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: termval_7
+          in: query
+          description: Seventh advanced search field value
+          schema:
+            type: string
+        - name: termtype_8
+          in: query
+          description: Eighth advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: termval_8
+          in: query
+          description: Eighth advanced search field value
+          schema:
+            type: string
+        - name: termtype_9
+          in: query
+          description: Ninth advanced search field type
+          schema:
+            type: string
+            enum: [title, author, publisher, edition_varia, year, original_filename, description_comments]
+        - name: termval_9
+          in: query
+          description: Ninth advanced search field value
           schema:
             type: string
       responses:
@@ -670,12 +943,7 @@ paths:
                           example: annas-archive.org
                         status:
                           type: string
-                          enum: [healthy, down, blacklisted]
-                        blacklistedFor:
-                          type: string
-                          nullable: true
-                          description: Countdown to unban (null if not blacklisted, recalculated per request)
-                          example: 245s
+                          enum: [up, down]
                         lastChecked:
                           type: string
                           format: date-time

@@ -47,8 +47,7 @@ export async function refreshHealthData() {
 /**
  * GET /health
  * Returns API health, domain status, cache stats, and browser pool state.
- * Data is cached and only updated every 10 minutes on the server side.
- * However, uptime and blacklistedFor timestamps are recalculated per request.
+ * Domain status and uptime are recalculated per request.
  */
 router.get('/', async (req: Request, res: Response) => {
   // Initialize cache if empty
@@ -66,7 +65,7 @@ router.get('/', async (req: Request, res: Response) => {
 
   // Recalculate dynamic values on each request
   const updatedUptime = Math.round(process.uptime()) + 's';
-  const domainsWithFreshTimestamps = domainMgr.getDomainStatus(); // Refreshes blacklistedFor countdown
+  const domainsWithFreshTimestamps = domainMgr.getDomainStatus();
   const freshCacheStats = await cache.getStats();
   const freshMemory = formatMemory(process.memoryUsage());
 

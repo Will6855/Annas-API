@@ -89,15 +89,9 @@ export function getDomainStatus(): DomainHealth[] {
     const unbanTime = blacklist.get(domain);
     const isBlacklisted = unbanTime && now < unbanTime;
 
-    // Status logic:
-    // 1. If currently blacklisted -> 'blacklisted'
-    // 2. If not blacklisted but last seen as down -> 'down'
-    // 3. Otherwise -> 'healthy' (assumed healthy until proven otherwise)
-    let status: DomainHealth['status'] = 'healthy';
-    if (isBlacklisted) {
-      status = 'blacklisted';
-    } else if (info) {
-      status = info.status;
+    let status: DomainHealth['status'] = 'up';
+    if (info?.status === 'down' || isBlacklisted) {
+      status = 'down';
     }
 
     return {
@@ -105,7 +99,6 @@ export function getDomainStatus(): DomainHealth[] {
       status,
       lastChecked: info?.lastChecked ? new Date(info.lastChecked).toISOString() : undefined,
       lastError: info?.lastError || null,
-      blacklistedFor: isBlacklisted ? `${Math.ceil((unbanTime - now) / 1000)}s` : null,
     };
   });
 }

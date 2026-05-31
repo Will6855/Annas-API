@@ -18,7 +18,7 @@ const router = express.Router();
  *   content           {string}  optional  - book_any|book_fiction|book_nonfiction|magazine|standards_document|comics|other
  *   index             {string}  optional  - journals|digital_lending|meta
  *   termtype_N        {string}  optional  - Advanced search field type (title|author|publisher|edition_varia|year|original_filename|description_comments)
- *   term_N            {string}  optional  - Advanced search field value (N = 1, 2, 3, ...)
+ *   termval_N         {string}  optional  - Advanced search field value (N = 1, 2, 3, ...)
  */
 router.get('/', async (req: Request, res: Response): Promise<any> => {
   const page = req.query.page as string | undefined;
@@ -30,12 +30,13 @@ router.get('/', async (req: Request, res: Response): Promise<any> => {
 
   const q = (req.query.q as string) || '';
 
-  // Extract advanced search fields from query params (termtype_1, term_1, termtype_2, term_2, ...)
+  // Extract advanced search fields from query params (termtype_1, termval_1, termtype_2, termval_2, ...)
+  // Extract advanced search fields from query params (termtype_1, termval_1, termtype_2, termval_2, ...)
   const advancedSearch: Array<{ termtype?: string | null; term?: string | null }> = [];
   let fieldIndex = 1;
   while (true) {
     const termtype = req.query[`termtype_${fieldIndex}`] as string | undefined;
-    const term = req.query[`term_${fieldIndex}`] as string | undefined;
+    const term = req.query[`termval_${fieldIndex}`] as string | undefined;
 
     // Stop if no more fields
     if (!termtype && !term) break;

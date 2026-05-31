@@ -36,6 +36,13 @@ export const config = {
     max:      parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
   },
 
+  defaultRateLimits: {
+    bookDetail:  parseInt(process.env.DEFAULT_RATE_LIMIT_BOOK_DETAIL  || process.env.DEFAULT_RATE_LIMIT || '100', 10),
+    bookDownload: parseInt(process.env.DEFAULT_RATE_LIMIT_BOOK_DOWNLOAD || process.env.DEFAULT_RATE_LIMIT || '100', 10),
+    bookRelated: parseInt(process.env.DEFAULT_RATE_LIMIT_BOOK_RELATED  || process.env.DEFAULT_RATE_LIMIT || '100', 10),
+    search:     parseInt(process.env.DEFAULT_RATE_LIMIT_SEARCH  || process.env.DEFAULT_RATE_LIMIT || '100', 10),
+  },
+
   domains: (process.env.ROTATION_DOMAINS || 'annas-archive.gl,annas-archive.org,annas-archive.se,annas-archive.gd,annas-archive.pk')
     .split(',')
     .map(d => d.trim())

@@ -63,6 +63,8 @@ All endpoints except `/health` and `/api/auth/login` require a **Bearer token** 
 | `POST` | `/api/auth/register` | Register a new user | ✅ Admin |
 | `GET` | `/api/auth/users` | List all registered users | ✅ Admin |
 | `PUT` | `/api/auth/users/:id` | Update a user | ✅ Admin |
+| `GET` | `/api/auth/me` | View own account & current rate limit usage | ✅ |
+| `GET` | `/api/auth/users/:id/usage` | View API usage records for a user | ✅ Admin |
 | `GET` | `/api/search` | Search for books | ✅ |
 | `GET` | `/api/book/:md5` | Get full book details and download links | ✅ |
 | `GET` | `/api/book/:md5/related` | Get related/similar books | ✅ |
@@ -73,9 +75,9 @@ All endpoints except `/health` and `/api/auth/login` require a **Bearer token** 
 ```
 GET /api/search?q=<query>&page=<n>&lang=<lang>&ext=<ext>&sort=<sort>&content=<type>
 ```
-Advanced multi-field search (up to 3 fields):
+Advanced multi-field search (up to 9 fields) with field types `title`, `author`, `publisher`, `edition_varia`, `year`, `original_filename`, `description_comments`:
 ```
-GET /api/search?termtype_1=author&term_1=asimov&termtype_2=year&term_2=1950
+GET /api/search?termtype_1=author&termval_1=asimov&termtype_2=year&termval_2=1950
 ```
 
 | Param | Type | Description |
@@ -88,7 +90,7 @@ GET /api/search?termtype_1=author&term_1=asimov&termtype_2=year&term_2=1950
 | `content` | `enum` | `book_any`, `book_fiction`, `book_nonfiction`, `magazine`, `standards_document`, `comics`, `other` |
 | `index` | `enum` | `journals`, `digital_lending`, `meta` |
 | `termtype_N` | `enum` | Field type: `title`, `author`, `publisher`, `edition_varia`, `year`, `original_filename`, `description_comments` |
-| `term_N` | `string` | Field value (paired with `termtype_N`) |
+| `termval_N` | `string` | Field value (paired with `termtype_N`) |
 
 ### Book Details
 ```
@@ -117,7 +119,7 @@ Automatically handles DDoS-guard challenges and LibGen ad-page link resolution, 
 ```
 GET /health
 ```
-Returns uptime, server start time, live memory usage, per-domain health/blacklist status, live cache statistics, and browser pool utilization. Domain status cached 10 min; everything else is fresh per request.
+Returns uptime, server start time, live memory usage, per-domain up/down status, live cache statistics, and browser pool utilization. Domain status cached 10 min; everything else is fresh per request.
 
 ## 🔐 Authentication
 
@@ -142,8 +144,51 @@ curl http://localhost:3000/api/search?q=neuromancer \
 
 | Role | Permissions |
 |---|---|
-| `admin` | Register/list/update users, flush cache, all data endpoints |
+| `admin` | Register/list/update users, view user API usage, flush cache, all data endpoints |
 | `user` | Search, book details, related books, download |
+
+Login and registration responses now include per-endpoint rate limit fields:
+
+```json
+{
+	"user": {
+		"rateLimitBookDetail": -1,
+		"rateLimitBookDownload": -1,
+		"rateLimitBookRelated": -1,
+		"rateLimitSearch": -1
+	}
+}
+```
+
+`-1` means unlimited, `0` means blocked. Registering a new user applies the `DEFAULT_RATE_LIMIT_*` defaults.
+
+### View your own rate limits
+
+```
+GET /api/auth/me
+```
+
+Returns your account details and real-time rate limit usage for the current window:
+
+```json
+{
+	"user": { "id": "...", "username": "admin", "role": "admin" },
+	"rateLimits": {
+		"bookDetail":   { "limit": -1, "current": 0 },
+		"bookDownload":  { "limit": -1, "current": 0 },
+		"bookRelated":   { "limit": -1, "current": 0 },
+		"search":        { "limit": -1, "current": 0 }
+	}
+}
+```
+
+### View user API usage (Admin)
+
+```
+GET /api/auth/users/:id/usage?limit=100&offset=0
+```
+
+Returns paginated usage records and current rate limit usage for a specific user. Max 500 records per request.
 
 ## ⚙️ Configuration
 
@@ -166,6 +211,11 @@ Configuration via environment variables (see `.env`):
 | `MAX_RETRIES` | `2` | Scraping retries per domain |
 | `RATE_LIMIT_MAX` | `100` | Max requests per window |
 | `RATE_LIMIT_WINDOW` | `60000` | Rate limit window (ms) |
+| `DEFAULT_RATE_LIMIT` | `100` | Default rate limit for all endpoints |
+| `DEFAULT_RATE_LIMIT_BOOK_DETAIL` | `100` | Rate limit for book detail (per window) |
+| `DEFAULT_RATE_LIMIT_BOOK_DOWNLOAD` | `100` | Rate limit for book download (per window) |
+| `DEFAULT_RATE_LIMIT_BOOK_RELATED` | `100` | Rate limit for related books (per window) |
+| `DEFAULT_RATE_LIMIT_SEARCH` | `100` | Rate limit for search (per window) |
 | `RETRY_DELAY` | `1500` | Delay between scrape retries (ms) |
 | `ROTATION_DOMAINS` | _(5 mirrors)_ | Comma-separated mirror list |
 | `DATABASE_URL` | — | PostgreSQL URL (production) |
@@ -199,11 +249,16 @@ src/
 ├── db.ts                  # TypeORM DataSource + auto-seed
 ├── domainManager.ts       # Domain health tracking & blacklist
 ├── types/index.ts         # TypeScript interfaces
-├── entities/User.ts       # User entity
-├── middleware/auth.ts     # JWT auth & role guard
+├── entities/
+│   ├── User.ts            # User entity (with per-endpoint rate limits)
+│   └── ApiUsage.ts        # API usage tracking entity
+├── middleware/
+│   ├── auth.ts            # JWT auth & role guard
+│   ├── usageTracker.ts    # API usage tracking middleware
+│   └── userRateLimiter.ts # Per-endpoint rate limiter
 ├── routes/                # Express route handlers
-│   ├── health.ts          # Health & cache management
-│   ├── auth.ts            # Login, register, user CRUD
+│   ├── health.ts          # Health & cache management (up/down domain status)
+│   ├── auth.ts            # Login, register, user CRUD, /me, /usage
 │   ├── search.ts          # Book search
 │   ├── book.ts            # Book details & download
 │   └── related.ts         # Related recommendations

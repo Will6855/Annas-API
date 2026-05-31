@@ -54,7 +54,14 @@ app.use('/health',       healthRouter);
 
 // Require Bearer token for all other API endpoints
 import { authenticate } from './middleware/auth';
+import { trackUsage } from './middleware/usageTracker';
+import { createUserRateLimiter } from './middleware/userRateLimiter';
 app.use('/api/',         authenticate);
+app.use('/api/',         trackUsage);
+
+// Per-user rate limiters (applied before specific route handlers)
+app.use('/api/search',   createUserRateLimiter('search'));
+app.use('/api/book',     createUserRateLimiter('book'));
 
 app.use('/api/cache',    healthRouter);   // DELETE /api/cache is on healthRouter
 app.use('/api/search',   searchRouter);

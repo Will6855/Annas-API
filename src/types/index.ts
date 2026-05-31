@@ -84,8 +84,7 @@ export interface ScrapeRelatedResponse {
 
 export interface DomainHealth {
   domain: string;
-  status: 'healthy' | 'blacklisted' | 'down' | 'unknown';
+  status: 'up' | 'down';
   lastChecked?: string;
   lastError?: string | null;
-  blacklistedFor: string | null;
 }
