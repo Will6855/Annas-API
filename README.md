@@ -21,7 +21,7 @@ A production-ready REST API for searching and retrieving book metadata from **An
 - 🤖 **Stealth Scraping** — Playwright + CloakBrowser with user-agent rotation, Cloudflare challenge handling, and `navigator.webdriver` masking
 - 🔄 **Domain Rotation** — Auto-rotates across all Anna's Archive mirrors with up/down tracking, retries with exponential backoff, and background health checks
 - ⚡ **Multi-Layer Caching** — Independent TTLs per resource (search, book, related) with pluggable `node-cache` (memory) or **Redis** engines
-- 🔐 **JWT Authentication** — Role-based access control (`user` / `admin`) with login, registration, and user management
+- 🔐 **JWT + API Key Authentication** — Role-based access control (`user` / `admin`) with login, registration, user management, and persistent API keys (`aa_sk_` prefix) for machine-to-machine usage
 - 🏊 **Browser Pool** — Reusable Playwright instances with configurable pool size, FIFO request queuing, and idle timeout cleanup
 - 📥 **Book Download** — Resolves real download links from slow servers and LibGen with automatic DDoS-guard cooldown handling
 - 🔗 **Related Books Engine** — Multi-signal recommendation scoring (author, title keywords, publisher, extension)
@@ -69,6 +69,10 @@ All endpoints except `/health` and `/api/auth/login` require a **Bearer token** 
 | `GET` | `/api/book/:md5` | Get full book details and download links | ✅ |
 | `GET` | `/api/book/:md5/related` | Get related/similar books | ✅ |
 | `GET` | `/api/book/:md5/download` | Download a book file | ✅ |
+| `POST` | `/api/auth/api-keys` | Create a new API key | ✅ |
+| `GET` | `/api/auth/api-keys` | List your own API keys | ✅ |
+| `DELETE` | `/api/auth/api-keys/:id` | Revoke one of your API keys | ✅ |
+| `GET` | `/api/auth/users/:id/api-keys` | List any user's API keys | ✅ Admin |
 | `DELETE` | `/api/cache` | Flush the entire cache | ✅ Admin |
 
 ### Search
@@ -123,7 +127,19 @@ Returns uptime, server start time, live memory usage, per-domain up/down status,
 
 ## 🔐 Authentication
 
-The API uses **JWT-based authentication**. On first launch, a default admin is auto-seeded:
+The API supports two authentication methods:
+- **JWT tokens** — obtained via login; short-lived (default 24h)
+- **API keys** — persistent tokens prefixed with `aa_sk_`; can be created and revoked per-user
+
+Either method is passed as a `Bearer` token in the `Authorization` header:
+
+```
+Authorization: Bearer <token_or_api_key>
+```
+
+### Default Admin Account
+
+On first launch, a default admin is auto-seeded:
 
 | Username | Password | Role |
 |---|---|---|
@@ -181,6 +197,94 @@ Returns your account details and real-time rate limit usage for the current wind
 	}
 }
 ```
+
+### API Key Management
+
+API keys are persistent tokens that serve as an alternative to JWT authentication. They use a `aa_sk_` prefix and never expire unless explicitly revoked. Each user can create multiple named keys for different applications or services.
+
+#### Creating an API Key
+
+```bash
+curl -X POST http://localhost:3000/api/auth/api-keys \
+	-H "Authorization: Bearer <jwt_or_api_key>" \
+	-H "Content-Type: application/json" \
+	-d '{"name":"my-app"}'
+```
+
+Response (raw key shown **once** — store it securely):
+
+```json
+{
+	"success": true,
+	"apiKey": {
+		"id": "uuid",
+		"name": "my-app",
+		"key": "aa_sk_Xk3mR9vTqL2nPwYdJcBsHfUeAiOgMzNl",
+		"keyPrefix": "aa_sk_Xk3mR9...",
+		"createdAt": "2026-05-31T12:00:00.000Z"
+	}
+}
+```
+
+> ⚠️ The full key is only returned on creation. If lost, revoke it and create a new one.
+
+#### Using an API Key
+
+Pass it as a Bearer token — exactly like a JWT:
+
+```bash
+curl http://localhost:3000/api/search?q=neuromancer \
+	-H "Authorization: Bearer aa_sk_Xk3mR9vTqL2nPwYdJcBsHfUeAiOgMzNl"
+```
+
+#### Listing Your API Keys
+
+```bash
+curl http://localhost:3000/api/auth/api-keys \
+	-H "Authorization: Bearer <jwt_or_api_key>"
+```
+
+Returns metadata only (prefix, name, dates) — full keys and hashes are never exposed:
+
+```json
+{
+	"success": true,
+	"apiKeys": [
+		{
+			"id": "uuid",
+			"keyPrefix": "aa_sk_Xk3mR9...",
+			"name": "my-app",
+			"lastUsedAt": "2026-05-31T12:30:00.000Z",
+			"createdAt": "2026-05-31T12:00:00.000Z",
+			"revokedAt": null
+		}
+	]
+}
+```
+
+#### Revoking an API Key
+
+```bash
+curl -X DELETE http://localhost:3000/api/auth/api-keys/:id \
+	-H "Authorization: Bearer <jwt_or_api_key>"
+```
+
+Once revoked, the key can no longer authenticate requests. Revocation is permanent — create a new key if needed.
+
+#### Admin: View Any User's API Keys
+
+```bash
+curl http://localhost:3000/api/auth/users/:id/api-keys \
+	-H "Authorization: Bearer <admin_jwt_or_api_key>"
+```
+
+#### How It Works
+
+- Keys are stored as **SHA-256 hashes** — the raw key is never persisted
+- A 60-second in-memory cache avoids a database lookup on every request
+- Each request updates `lastUsedAt` non-blockingly
+- Revoked keys are immediately removed from the in-memory cache
+- When authenticating, the middleware auto-detects the `aa_sk_` prefix and routes to API key validation instead of JWT verification
 
 ### View user API usage (Admin)
 
@@ -248,11 +352,13 @@ src/
 ├── db.ts                  # TypeORM DataSource + auto-seed
 ├── domainManager.ts       # Domain health tracking & up/down status
 ├── types/index.ts         # TypeScript interfaces
+├── apiKeyCache.ts         # In-memory cache for API key → user lookups (60s TTL)
 ├── entities/
 │   ├── User.ts            # User entity (with per-endpoint rate limits)
+│   ├── ApiKey.ts          # API key entity (SHA-256 hash, prefix, revocation)
 │   └── ApiUsage.ts        # API usage tracking entity
 ├── middleware/
-│   ├── auth.ts            # JWT auth & role guard
+│   ├── auth.ts            # JWT + API key auth & role guard
 │   ├── usageTracker.ts    # API usage tracking middleware
 │   └── userRateLimiter.ts # Per-endpoint rate limiter
 ├── routes/                # Express route handlers
