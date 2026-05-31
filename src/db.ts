@@ -1,6 +1,7 @@
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { User } from './entities/User';
 import { ApiUsage } from './entities/ApiUsage';
+import { ApiKey } from './entities/ApiKey';
 import { config } from './config';
 import { logger } from './logger';
 import bcrypt from 'bcrypt';
@@ -12,14 +13,14 @@ const dbConfig: DataSourceOptions = isProd
       url: config.db.url,
       synchronize: false,
       logging: false,
-      entities: [User, ApiUsage],
+      entities: [User, ApiUsage, ApiKey],
     }
   : {
       type: 'better-sqlite3',
       database: 'dev.sqlite',
       synchronize: true,
       logging: false,
-      entities: [User, ApiUsage],
+      entities: [User, ApiUsage, ApiKey],
     };
 
 export const AppDataSource = new DataSource(dbConfig);

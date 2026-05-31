@@ -9,26 +9,26 @@ export const config = {
 
   cache: {
     type:       (process.env.CACHE_TYPE || 'memory') as 'memory' | 'redis',
-    ttlSearch:  parseInt(process.env.CACHE_TTL_SEARCH || '300',   10),
-    ttlBook:    parseInt(process.env.CACHE_TTL_BOOK || '3600',     10),
-    ttlRelated: parseInt(process.env.CACHE_TTL_RELATED || '3600',  10),
-    ttlDomain:  parseInt(process.env.CACHE_TTL_DOMAIN || '600',   10),
+    ttlSearch:  parseInt(process.env.CACHE_TTL_SEARCH || '300',    10),
+    ttlBook:    parseInt(process.env.CACHE_TTL_BOOK || '3600',      10),
+    ttlRelated: parseInt(process.env.CACHE_TTL_RELATED || '3600',   10),
+    ttlDomain:  parseInt(process.env.CACHE_TTL_DOMAIN || '300',    10),  // shorter: retry failed domains sooner
   },
 
   redis: {
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
+    url:    process.env.REDIS_URL || 'redis://localhost:6379',
     prefix: process.env.REDIS_PREFIX || 'annas-api:',
   },
 
   browser: {
     poolSize: parseInt(process.env.BROWSER_POOL_SIZE || '2', 10),
-    timeout:  parseInt(process.env.BROWSER_TIMEOUT || '30000', 10),
+    timeout:  parseInt(process.env.BROWSER_TIMEOUT || '15000', 10),  // reduced: HTTP fetches are faster
     idleTimeoutMs: parseInt(process.env.BROWSER_IDLE_TIMEOUT || '60000', 10),
   },
 
   scraping: {
-    maxRetries: parseInt(process.env.MAX_RETRIES || '2', 10),
-    retryDelay: parseInt(process.env.RETRY_DELAY || '1500', 10),
+    maxRetries: parseInt(process.env.MAX_RETRIES || '1', 10),       // reduced: HTTP is fast, don't retry much
+    retryDelay: parseInt(process.env.RETRY_DELAY || '500', 10),     // reduced: faster retry backoff
   },
 
   rateLimit: {

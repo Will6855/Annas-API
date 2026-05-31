@@ -16,6 +16,9 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
+      # Note: BearerAuth also accepts API keys with the prefix aa_sk_
+      # (e.g. "Bearer aa_sk_Xk3mR9vTqL2nPwYdJcBsHfUeAiOgMzNl").
+      # Both JWT and API keys resolve to the same user with the same permissions.
 
   schemas:
     User:
@@ -237,6 +240,55 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/LinkStatus'
+
+    ApiKey:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Internal ID of the API key record
+        key:
+          type: string
+          description: The raw API key (only shown once on creation)
+        keyPrefix:
+          type: string
+          description: Truncated prefix for identification (e.g. "aa_sk_Xk3mR9...")
+        name:
+          type: string
+          nullable: true
+          description: Optional human-readable label for the key
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last use
+        createdAt:
+          type: string
+          format: date-time
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set when the key is revoked
+
+    ApiKeyCreated:
+      type: object
+      properties:
+        success:
+          type: boolean
+        apiKey:
+          $ref: '#/components/schemas/ApiKey'
+
+    ApiKeyList:
+      type: object
+      properties:
+        success:
+          type: boolean
+        apiKeys:
+          type: array
+          items:
+            $ref: '#/components/schemas/ApiKey'
 
 paths:
   /api/auth/login:
@@ -535,6 +587,116 @@ paths:
                         type: array
                         items:
                           $ref: '#/components/schemas/ApiUsageRecord'
+        '403':
+          description: Forbidden (Admin role required)
+        '404':
+          description: User not found
+
+  # ────────────────────────────────────────────────────────────────────────
+  # API Key Management
+  # ────────────────────────────────────────────────────────────────────────
+
+  /api/auth/api-keys:
+    post:
+      tags: [Auth]
+      summary: Create an API key
+      description: |
+        Authenticated users can create an API key as an alternative to JWT authentication.
+        The raw key is shown exactly once in the response — it cannot be retrieved again.
+        Store it securely. Key format: aa_sk_<base64url>.
+      security:
+        - BearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: Optional label for the key
+      responses:
+        '201':
+          description: API key created — raw key shown once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
+        '401':
+          description: Unauthorized
+
+    get:
+      tags: [Auth]
+      summary: List own API keys
+      description: Returns metadata (prefix, name, dates) for all API keys belonging to the authenticated user. Full keys and hashes are never exposed.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: API key list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyList'
+        '401':
+          description: Unauthorized
+
+  /api/auth/api-keys/{id}:
+    delete:
+      tags: [Auth]
+      summary: Revoke an API key
+      description: Revoke one of your own API keys by ID. Once revoked, the key can no longer be used for authentication.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID of the API key to revoke
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: API key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '400':
+          description: API key is already revoked
+        '401':
+          description: Unauthorized
+        '404':
+          description: API key not found
+
+  /api/auth/users/{id}/api-keys:
+    get:
+      tags: [Auth]
+      summary: List user API keys (admin)
+      description: Admin only. Retrieve metadata for all API keys belonging to a specific user.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: ID of the user
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: User's API keys
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyList'
         '403':
           description: Forbidden (Admin role required)
         '404':
@@ -893,7 +1055,7 @@ paths:
       summary: API Health status
       description: |
         Returns system health info: uptime, memory usage, domain status, cache statistics, and browser pool state.
-        Domain status is cached and only refreshed every 10 minutes server-side. Uptime, memory, cache stats, and domain blacklist timers are live per request.
+        Domain status is cached and only refreshed every 10 minutes server-side. Uptime, memory, cache stats, and domain down status are live per request.
       responses:
         '200':
           description: System health info

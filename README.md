@@ -19,7 +19,7 @@ A production-ready REST API for searching and retrieving book metadata from **An
 ## 🎯 Key Features at a Glance
 
 - 🤖 **Stealth Scraping** — Playwright + CloakBrowser with user-agent rotation, Cloudflare challenge handling, and `navigator.webdriver` masking
-- 🔄 **Domain Rotation** — Auto-rotates across all Anna's Archive mirrors with blacklisting, retries with exponential backoff, and background health checks
+- 🔄 **Domain Rotation** — Auto-rotates across all Anna's Archive mirrors with up/down tracking, retries with exponential backoff, and background health checks
 - ⚡ **Multi-Layer Caching** — Independent TTLs per resource (search, book, related) with pluggable `node-cache` (memory) or **Redis** engines
 - 🔐 **JWT Authentication** — Role-based access control (`user` / `admin`) with login, registration, and user management
 - 🏊 **Browser Pool** — Reusable Playwright instances with configurable pool size, FIFO request queuing, and idle timeout cleanup
@@ -204,7 +204,6 @@ Configuration via environment variables (see `.env`):
 | `CACHE_TTL_SEARCH` | `300` | Search cache TTL (s) |
 | `CACHE_TTL_BOOK` | `3600` | Book detail TTL (s) |
 | `CACHE_TTL_RELATED` | `3600` | Related books TTL (s) |
-| `CACHE_TTL_DOMAIN` | `600` | Domain blacklist TTL (s) |
 | `BROWSER_POOL_SIZE` | `2` | Max concurrent browsers |
 | `BROWSER_TIMEOUT` | `30000` | Page timeout (ms) |
 | `BROWSER_IDLE_TIMEOUT` | `60000` | Idle cleanup timeout (ms) |
@@ -228,14 +227,14 @@ Configuration via environment variables (see `.env`):
 | Search results | 5 min | Memory (NodeCache) or Redis |
 | Book details | 1 h | Memory (NodeCache) or Redis |
 | Related books | 1 h | Memory (NodeCache) or Redis |
-| Domain blacklist | 10 min | In-memory |
+| Domain down status | 10 min | In-memory |
 
 Flush cache: `DELETE /api/cache` (admin only).
 
 ### Domain Rotation
 Default mirrors: `annas-archive.gl`, `annas-archive.org`, `annas-archive.se`, `annas-archive.gd`, `annas-archive.pk`.
 
-The scraper tries healthy domains first, blacklists failures for `CACHE_TTL_DOMAIN` seconds, retries with exponential backoff, and falls back through the full list if all are blacklisted.
+The scraper tries healthy domains first, marks failures as down for 600 seconds, retries with exponential backoff, and falls back through the full list if all are down.
 
 ## 📁 Project Structure
 
@@ -247,7 +246,7 @@ src/
 ├── browserPool.ts         # Playwright browser pool
 ├── cache.ts               # Caching abstraction (memory / Redis)
 ├── db.ts                  # TypeORM DataSource + auto-seed
-├── domainManager.ts       # Domain health tracking & blacklist
+├── domainManager.ts       # Domain health tracking & up/down status
 ├── types/index.ts         # TypeScript interfaces
 ├── entities/
 │   ├── User.ts            # User entity (with per-endpoint rate limits)

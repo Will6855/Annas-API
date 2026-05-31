@@ -5,6 +5,7 @@ dotenv.config();
 import express, { Request, Response, NextFunction } from 'express';
 import helmet from 'helmet';
 import cors from 'cors';
+import compression from 'compression';
 import morgan from 'morgan';
 import rateLimit from 'express-rate-limit';
 import { config } from './config';
@@ -20,6 +21,10 @@ import authRouter from './routes/auth';
 import { initializeDatabase } from './db';
 
 const app = express();
+
+// ── Security & Middleware ──────────────────────────────────────────────────────
+// Response compression (gzip/brotli) — reduce wire size by ~70%
+app.use(compression({ level: 6, threshold: 1024 }));
 
 // ── Security & Middleware ──────────────────────────────────────────────────────
 app.use(helmet());

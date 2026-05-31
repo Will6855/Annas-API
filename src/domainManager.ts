@@ -5,8 +5,6 @@ import { DomainHealth } from './types';
 // The baseline config list of domains
 const mirrors = config.domains;
 
-// In-memory blacklist of failing domains: Map<domain, unbanTimestampMs>
-const blacklist = new Map<string, number>();
 
 // Persistent history of domain health
 interface DomainInfo {
@@ -18,7 +16,7 @@ const history = new Map<string, DomainInfo>();
 
 /**
  * Get the list of domains, ordered by preference.
- * Domains that are blacklisted are moved to the bottom of the list.
+ * Domains that are down are moved to the bottom of the list.
  */
 export function getOrderedDomains(): string[] {
   const now = Date.now();
@@ -26,17 +24,12 @@ export function getOrderedDomains(): string[] {
   const failing: string[] = [];
 
   for (const domain of mirrors) {
-    const unbanTime = blacklist.get(domain);
+    const info = history.get(domain);
 
-    if (unbanTime && now < unbanTime) {
-      // Still blacklisted
+    if (info?.status === 'down' && info.lastChecked && (now - info.lastChecked) < config.cache.ttlDomain * 1000) {
+      // Still within the down grace period
       failing.push(domain);
     } else {
-      if (unbanTime) {
-        // Blacklist expired, mark as healthy again in rotation
-        blacklist.delete(domain);
-        logger.info(`Domain ${domain} has been unbanned from blacklist.`);
-      }
       healthy.push(domain);
     }
   }
@@ -46,12 +39,10 @@ export function getOrderedDomains(): string[] {
 }
 
 /**
- * Mark a domain as failed. It will be blacklisted for the configured TTL.
+ * Mark a domain as failed. It will stay down until the health refresh interval passes.
  */
 export function markFailed(domain: string, error?: string): void {
   const now = Date.now();
-  const unbanTime = now + (config.cache.ttlDomain * 1000);
-  blacklist.set(domain, unbanTime);
 
   history.set(domain, {
     status: 'down',
@@ -59,19 +50,15 @@ export function markFailed(domain: string, error?: string): void {
     lastChecked: now,
   });
 
-  logger.warn(`Domain ${domain} blacklisted for ${config.cache.ttlDomain}s - Reason: ${error || 'Unknown'}`);
+  logger.warn(`Domain ${domain} marked down (will recheck in ${config.cache.ttlDomain}s) - Reason: ${error || 'Unknown'}`);
 }
 
 /**
- * Mark a domain as healthy, removing it from the blacklist if it was there.
+ * Mark a domain as healthy.
  */
 export function markHealthy(domain: string): void {
-  if (blacklist.has(domain)) {
-    blacklist.delete(domain);
-  }
-
   history.set(domain, {
-    status: 'healthy',
+    status: 'healthy' as const,
     lastChecked: Date.now(),
     lastError: null as any,
   });
@@ -86,11 +73,10 @@ export function getDomainStatus(): DomainHealth[] {
   const now = Date.now();
   return mirrors.map(domain => {
     const info = history.get(domain);
-    const unbanTime = blacklist.get(domain);
-    const isBlacklisted = unbanTime && now < unbanTime;
+    const isDown = info?.status === 'down' && !!info.lastChecked && (now - info.lastChecked) < config.cache.ttlDomain * 1000;
 
     let status: DomainHealth['status'] = 'up';
-    if (info?.status === 'down' || isBlacklisted) {
+    if (isDown) {
       status = 'down';
     }
 

@@ -7,6 +7,10 @@ interface RateLimitEntry {
   timestamps: number[];
 }
 
+// In-memory cache: userId -> { limit, fetchedAt }
+const limitCache = new Map<string, { limit: number; fetchedAt: number }>();
+const LIMIT_CACHE_TTL = 30_000; // 30s
+
 const stores = new Map<string, Map<string, RateLimitEntry>>();
 
 // Window size: 1 minute
@@ -56,17 +60,19 @@ export function createUserRateLimiter(endpointType: 'search' | 'book') {
     }
 
     try {
-      const userRepository = AppDataSource.getRepository(User);
-      const user = await userRepository.findOne({
-        where: { id: req.user.id },
-        select: { id: true, [field]: true } as any,
-      });
-
-      if (!user) {
-        return next();
+      // Fetch user's rate limit from cache or DB
+      let limit = limitCache.get(req.user.id)?.limit;
+      const cachedAt = limitCache.get(req.user.id)?.fetchedAt ?? 0;
+      if (limit === undefined || Date.now() - cachedAt > LIMIT_CACHE_TTL) {
+        const userRepository = AppDataSource.getRepository(User);
+        const user = await userRepository.findOne({
+          where: { id: req.user.id },
+          select: { id: true, [field]: true } as any,
+        });
+        if (!user) return next();
+        limit = user[field as keyof typeof user] as number;
+        limitCache.set(req.user.id, { limit, fetchedAt: Date.now() });
       }
-
-      const limit = user[field as keyof typeof user] as number;
 
       // Get or create store for this user + endpoint (always track for progress)
       const userId = req.user.id;

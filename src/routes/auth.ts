@@ -3,11 +3,14 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { AppDataSource } from '../db';
 import { User } from '../entities/User';
+import { ApiKey } from '../entities/ApiKey';
 import { config } from '../config';
 import { authenticate, requireRole } from '../middleware/auth';
 import { trackUsage } from '../middleware/usageTracker';
 import { ApiUsage } from '../entities/ApiUsage';
 import { getUserRateLimitProgress } from '../middleware/userRateLimiter';
+import { invalidateCachedKey } from '../apiKeyCache';
+import crypto from 'crypto';
 
 const router = Router();
 
@@ -272,6 +275,127 @@ router.get('/users/:id/usage', authenticate, requireRole('admin'), trackUsage, a
         records
       }
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+// ── API Key Management ──────────────────────────────────────────────────────
+
+/**
+ * Generate a new API key.
+ * POST /api/auth/api-keys
+ */
+router.post('/api-keys', authenticate, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as any;
+    const { name } = req.body as { name?: string };
+
+    const rawKey = 'aa_sk_' + crypto.randomBytes(24).toString('base64url');
+    const keyHash = crypto.createHash('sha256').update(rawKey).digest('hex');
+    const keyPrefix = rawKey.substring(0, 12) + '...';
+
+    const apiKeyRepo = AppDataSource.getRepository(ApiKey);
+    const apiKey = apiKeyRepo.create({
+      userId: authReq.user.id,
+      keyHash,
+      keyPrefix,
+      name: name || null,
+    });
+    await apiKeyRepo.save(apiKey);
+
+    res.status(201).json({
+      success: true,
+      apiKey: {
+        id: apiKey.id,
+        name: apiKey.name,
+        key: rawKey, // Shown once on creation
+        keyPrefix: apiKey.keyPrefix,
+        createdAt: apiKey.createdAt,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * List own API keys (metadata only — never expose hash or full key).
+ * GET /api/auth/api-keys
+ */
+router.get('/api-keys', authenticate, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as any;
+    const apiKeyRepo = AppDataSource.getRepository(ApiKey);
+    const keys = await apiKeyRepo.find({
+      where: { userId: authReq.user.id } as any,
+      select: { id: true, keyPrefix: true, name: true, lastUsedAt: true, createdAt: true, revokedAt: true } as any,
+      order: { createdAt: 'DESC' } as any,
+    });
+
+    res.json({ success: true, apiKeys: keys });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * Revoke one of own API keys.
+ * DELETE /api/auth/api-keys/:id
+ */
+router.delete('/api-keys/:id', authenticate, async (req: Request, res: Response) => {
+  try {
+    const authReq = req as any;
+    const { id } = req.params;
+
+    const apiKeyRepo = AppDataSource.getRepository(ApiKey);
+    const apiKey = await apiKeyRepo.findOne({
+      where: { id, userId: authReq.user.id } as any,
+    });
+
+    if (!apiKey) {
+      return res.status(404).json({ success: false, error: 'API key not found' });
+    }
+
+    if (apiKey.revokedAt) {
+      return res.status(400).json({ success: false, error: 'API key is already revoked' });
+    }
+
+    apiKey.revokedAt = new Date();
+    await apiKeyRepo.save(apiKey);
+
+    // Invalidate cache entry
+    invalidateCachedKey(apiKey.keyHash);
+
+    res.json({ success: true, message: 'API key revoked' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: 'Internal server error' });
+  }
+});
+
+/**
+ * Admin: list any user's API keys.
+ * GET /api/auth/users/:id/api-keys
+ */
+router.get('/users/:id/api-keys', authenticate, requireRole('admin'), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+
+    // Verify user exists
+    const userRepo = AppDataSource.getRepository(User);
+    const user = await userRepo.findOne({ where: { id } as any });
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+
+    const apiKeyRepo = AppDataSource.getRepository(ApiKey);
+    const keys = await apiKeyRepo.find({
+      where: { userId: id } as any,
+      select: { id: true, keyPrefix: true, name: true, lastUsedAt: true, createdAt: true, revokedAt: true } as any,
+      order: { createdAt: 'DESC' } as any,
+    });
+
+    res.json({ success: true, apiKeys: keys });
   } catch (error) {
     res.status(500).json({ success: false, error: 'Internal server error' });
   }

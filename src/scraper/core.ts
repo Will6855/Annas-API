@@ -1,4 +1,7 @@
 import type { Browser } from 'playwright';
+import axios from 'axios';
+import http from 'http';
+import https from 'https';
 import * as browserPool from '../browserPool';
 import * as domainMgr from '../domainManager';
 import { config } from '../config';
@@ -55,24 +58,103 @@ async function createStealthPage(browser: Browser) {
 }
 
 /**
+ * HTTP-client headers that mimic a real browser.
+ */
+function httpHeaders(domain: string) {
+  const ua = randomUA();
+  return {
+    'User-Agent': ua,
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Referer': `https://${domain}/`,
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
+    'DNT': '1',
+    'Connection': 'keep-alive',
+    'Cache-Control': 'max-age=0',
+  };
+}
+
+// Axios instance with keep-alive for connection reuse
+const httpClient = axios.create({
+  timeout: config.browser.timeout,
+  httpAgent: new http.Agent({ keepAlive: true }),
+  httpsAgent: new https.Agent({ keepAlive: true, rejectUnauthorized: false }),
+  maxRedirects: 5,
+  decompress: true,
+});
+
+/**
+ * Attempt to fetch a page via plain HTTP (axios).
+ * Much faster than Playwright — no browser overhead.
+ * Returns HTML string on success, or null if we hit a Cloudflare challenge.
+ * Throws on network errors / bad status codes.
+ */
+async function simpleFetchPage(url: string, domain: string): Promise<string | null> {
+  try {
+    logger.debug(`HTTP fetch: ${url}`);
+    const resp = await httpClient.get(url, {
+      headers: httpHeaders(domain),
+      responseType: 'text',
+      validateStatus: (status) => status < 400 || status === 403 || status === 429 || status === 503,
+    });
+
+    const status = resp.status;
+    const body: string = resp.data;
+
+    // Detect Cloudflare challenge pages
+    if (status === 403 || status === 429 || status === 503) {
+      if (body.includes('Cloudflare') || body.includes('Just a moment') || body.includes('cf-browser-verify') || body.includes('__cf_challenge')) {
+        logger.debug(`Cloudflare challenge detected on ${domain} (HTTP ${status}) — will fall back to Playwright`);
+        return null; // signal fallback to Playwright
+      }
+    }
+
+    if (status >= 400) {
+      throw new Error(`HTTP ${status} on ${domain}`);
+    }
+
+    domainMgr.markHealthy(domain);
+    return body;
+  } catch (err: any) {
+    // Network errors (DNS, connection refused, timeout) — allow retry
+    if (err.code === 'ECONNREFUSED' || err.code === 'ENOTFOUND' || err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT') {
+      throw err; // will be caught by fetchWithRotation → retry
+    }
+    // For other errors (e.g. invalid URL, parsing), re-throw
+    if (!err.response) throw err;
+
+    // If we got a non-Cloudflare 4xx/5xx, throw
+    throw err;
+  }
+}
+
+// ── Playwright fallback ─────────────────────────────────────────────────────
+
+/**
  * Navigate to a URL with retry logic and Cloudflare challenge handling.
  * Returns the HTML content string on success.
  *
  * @param url
- * @param domain  - The domain being tried (for blacklisting)
+ * @param domain  - The domain being tried (for tracking up/down status)
  * @returns HTML
  */
-export async function fetchPage(url: string, domain: string): Promise<string> {
+async function playwrightFetchPage(url: string, domain: string): Promise<string> {
+  // Reduce pool contention: acquire only when we really need Playwright
   const browser = await browserPool.acquire();
 
   try {
     const { page, ctx } = await createStealthPage(browser);
 
     try {
-      logger.debug(`Fetching: ${url}`);
+      logger.debug(`PW fetch: ${url}`);
 
       const response = await page.goto(url, {
-        waitUntil: 'domcontentloaded',
+        waitUntil: 'load',
         timeout:   config.browser.timeout,
       });
 
@@ -82,13 +164,16 @@ export async function fetchPage(url: string, domain: string): Promise<string> {
 
       // Detect Cloudflare IUAM / challenge
       if (status === 403 || status === 429 || status === 503) {
-        // Wait for Cloudflare to resolve (up to 10 s)
-        try {
-          await page.waitForSelector('body:not(.cf-mitigated)', { timeout: 10000 });
-        } catch {
-          // If it times out, check if page looks like a CF challenge
-          const bodyText = await page.textContent('body').catch(() => '') || '';
-          if (bodyText.includes('Cloudflare') || bodyText.includes('Just a moment')) {
+        // Quick check for Cloudflare — just look at the body text right away
+        const bodyText = await page.textContent('body').catch(() => '') || '';
+        if (bodyText.includes('Cloudflare') || bodyText.includes('Just a moment') || bodyText.includes('cf-browser-verify')) {
+          // Wait a bit for CF to resolve (up to 5s)
+          try {
+            await page.waitForFunction(
+              () => !document.body.innerText.includes('Just a moment'),
+              { timeout: 5000 }
+            );
+          } catch {
             throw new Error(`Cloudflare challenge on ${domain} (HTTP ${status})`);
           }
         }
@@ -97,9 +182,6 @@ export async function fetchPage(url: string, domain: string): Promise<string> {
       if (status >= 400) {
         throw new Error(`HTTP ${status} on ${domain}`);
       }
-
-      // Wait for main content to appear
-      await page.waitForSelector('body', { timeout: 5000 }).catch(() => {});
 
       const html = await page.content();
       domainMgr.markHealthy(domain);
@@ -113,11 +195,26 @@ export async function fetchPage(url: string, domain: string): Promise<string> {
 }
 
 /**
- * Try each domain in rotation order until one succeeds or all fail.
+ * Hybrid fetch: try simple HTTP first, fall back to Playwright if Cloudflare.
  *
- * @param buildUrl  - Given a domain, returns the full URL
+ * @param url
+ * @param domain  - The domain being tried
+ * @returns HTML
  */
-export async function fetchWithRotation(buildUrl: (domain: string) => string): Promise<{ html: string, domain: string }> {
+async function fetchPage(url: string, domain: string): Promise<string> {
+  // 1. Try simple HTTP (fast path)
+  const result = await simpleFetchPage(url, domain);
+  if (result !== null) return result;
+
+  // 2. Fall back to Playwright for Cloudflare bypass
+  logger.info(`Falling back to Playwright for ${domain}`);
+  return playwrightFetchPage(url, domain);
+}
+
+/**
+ * Try each domain in rotation order until one succeeds or all fail.
+ */
+export async function fetchWithRotation(buildUrl: (domain: string) => string): Promise<{ html: string; domain: string }> {
   const domains = domainMgr.getOrderedDomains();
   let lastError: Error | undefined;
 
@@ -161,15 +258,18 @@ export async function refreshDomainStatus(): Promise<void> {
     try {
       logger.info('Refreshing all domain statuses...');
       const domains = config.domains;
-      
-      // We check them sequentially to avoid overwhelming the browser pool
-      for (const domain of domains) {
+
+      // Check all domains concurrently via simple HTTP (no browser needed)
+      await Promise.allSettled(domains.map(async (domain) => {
         try {
-          await fetchPage(`https://${domain}/`, domain);
+          const result = await simpleFetchPage(`https://${domain}/`, domain);
+          if (result === null) {
+            domainMgr.markFailed(domain, 'Cloudflare challenge during refresh');
+          }
         } catch (err: any) {
           domainMgr.markFailed(domain, err.message);
         }
-      }
+      }));
       logger.info('Domain status refresh complete.');
     } finally {
       refreshPromise = null;
