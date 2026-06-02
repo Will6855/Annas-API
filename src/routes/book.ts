@@ -6,6 +6,7 @@ import * as browserPool from '../browserPool';
 import * as scraper from '../scraper';
 import * as cache from '../cache';
 import { logger } from '../logger';
+import contentDisposition from 'content-disposition';
 
 const router = express.Router();
 
@@ -520,7 +521,7 @@ router.get('/:md5/download', async (req: Request, res: Response): Promise<any> =
     }
 
     // ── Set response headers for file download ─────────────────────────────────
-    const filename = book.filename || `${book.title}.${book.extension || 'bin'}`;
+    const filename = contentDisposition(book.filename || `${book.title}.${book.extension || 'bin'}`);
     res.setHeader('Content-Type', downloadResult.headers['content-type'] || 'application/octet-stream');
     res.setHeader('Content-Length', downloadResult.headers['content-length'] || '0');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
