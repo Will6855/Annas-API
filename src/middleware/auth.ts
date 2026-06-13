@@ -104,6 +104,29 @@ function touchLastUsed(keyHash: string): void {
     .catch(() => {});
 }
 
+/**
+ * Synchronously checks if a request carries a valid credential (no DB).
+ * JWT: verified by signature. API key: checked against in-memory cache only
+ * (first-ever request with a new key returns false and hits the global limiter once).
+ */
+export function isAuthenticated(req: Request): boolean {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) return false;
+  const token = authHeader.split(' ')[1];
+
+  if (token.startsWith('aa_sk_')) {
+    const keyHash = crypto.createHash('sha256').update(token).digest('hex');
+    return getCachedUser(keyHash) !== null;
+  }
+
+  try {
+    jwt.verify(token, config.auth.jwtSecret);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export const requireRole = (role: string) => {
   return (req: AuthRequest, res: Response, next: NextFunction) => {
     if (!req.user) {

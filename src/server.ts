@@ -37,28 +37,28 @@ app.use(morgan('combined', {
   skip:   (req: Request) => req.path === '/health',
 }));
 
-// Rate limiting
-const limiter = rateLimit({
+// Global rate limiting (IP-based, first-line defense)
+app.use('/api/', rateLimit({
   windowMs: config.rateLimit.windowMs,
   max:      config.rateLimit.max,
   standardHeaders: true,
   legacyHeaders:   false,
-  handler: (req: Request, res: Response) => {
+  skip: (req: Request) => isAuthenticated(req),
+  handler: (_req: Request, res: Response) => {
     res.status(429).json({
       success: false,
       error:   'Too many requests. Please slow down.',
       retryAfter: Math.ceil(config.rateLimit.windowMs / 1000) + 's',
     });
   },
-});
-app.use('/api/', limiter);
+}));
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/api/auth',     authRouter);
 app.use('/health',       healthRouter);
 
 // Require Bearer token for all other API endpoints
-import { authenticate } from './middleware/auth';
+import { authenticate, isAuthenticated } from './middleware/auth';
 import { trackUsage } from './middleware/usageTracker';
 import { createUserRateLimiter } from './middleware/userRateLimiter';
 app.use('/api/',         authenticate);

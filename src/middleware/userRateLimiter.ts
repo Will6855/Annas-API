@@ -3,6 +3,7 @@ import { AppDataSource } from '../db';
 import { User } from '../entities/User';
 import { AuthRequest } from './auth';
 
+
 interface RateLimitEntry {
   timestamps: number[];
 }
@@ -35,10 +36,6 @@ export function createUserRateLimiter(endpointType: 'search' | 'book') {
   const isSearch = endpointType === 'search';
 
   return async (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user) {
-      return res.status(401).json({ success: false, error: 'Unauthorized' });
-    }
-
     // Determine which specific endpoint this request maps to
     const path = req.path;
     let field: string;
@@ -54,15 +51,18 @@ export function createUserRateLimiter(endpointType: 'search' | 'book') {
       field = 'rateLimitBookRelated';
       typeLabel = 'bookRelated';
     } else {
-      // Default: book detail (/:md5)
       field = 'rateLimitBookDetail';
       typeLabel = 'bookDetail';
     }
 
     try {
-      // Fetch user's rate limit from cache or DB
-      let limit = limitCache.get(req.user.id)?.limit;
-      const cachedAt = limitCache.get(req.user.id)?.fetchedAt ?? 0;
+      if (!req.user) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+      }
+
+      const cacheKey = `${req.user.id}:${field}`;
+      let limit = limitCache.get(cacheKey)?.limit;
+      const cachedAt = limitCache.get(cacheKey)?.fetchedAt ?? 0;
       if (limit === undefined || Date.now() - cachedAt > LIMIT_CACHE_TTL) {
         const userRepository = AppDataSource.getRepository(User);
         const user = await userRepository.findOne({
@@ -71,30 +71,28 @@ export function createUserRateLimiter(endpointType: 'search' | 'book') {
         });
         if (!user) return next();
         limit = user[field as keyof typeof user] as number;
-        limitCache.set(req.user.id, { limit, fetchedAt: Date.now() });
+        limitCache.set(cacheKey, { limit, fetchedAt: Date.now() });
       }
 
-      // Get or create store for this user + endpoint (always track for progress)
-      const userId = req.user.id;
-      if (!stores.has(userId)) {
-        stores.set(userId, new Map());
+      const identifier = req.user.id;
+      if (!stores.has(identifier)) {
+        stores.set(identifier, new Map());
       }
-      const userStore = stores.get(userId)!;
+      const identifierStore = stores.get(identifier)!;
 
       const now = Date.now();
       const windowStart = getWindowStart();
       const windowKey = `${typeLabel}:${windowStart}`;
 
-      if (!userStore.has(windowKey)) {
-        userStore.set(windowKey, { timestamps: [] });
+      if (!identifierStore.has(windowKey)) {
+        identifierStore.set(windowKey, { timestamps: [] });
       }
 
-      const entry = userStore.get(windowKey)!;
+      const entry = identifierStore.get(windowKey)!;
       pruneEntries(entry);
 
       entry.timestamps.push(now);
 
-      // Track usage for progress
       (req as any)._rateLimitKey = windowKey;
       (req as any)._rateLimitUsed = entry.timestamps.length;
       (req as any)._rateLimitMax = limit;
