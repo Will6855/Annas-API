@@ -19,12 +19,13 @@ A production-ready REST API for searching and retrieving book metadata from **An
 ## 🎯 Key Features at a Glance
 
 - 🤖 **Stealth Scraping** — Playwright + CloakBrowser with user-agent rotation, Cloudflare challenge handling, and `navigator.webdriver` masking
-- 🔄 **Domain Rotation** — Auto-rotates across all Anna's Archive mirrors with up/down tracking, retries with exponential backoff, and background health checks
+- 🔄 **Domain Rotation** — Auto-rotates across all Anna's Archive mirrors with up/down/rate-limited tracking, retries with exponential backoff, and immediate skip on HTTP 429 (2-minute cooldown)
 - ⚡ **Multi-Layer Caching** — Independent TTLs per resource (search, book, related) with pluggable `node-cache` (memory) or **Redis** engines
 - 🔐 **JWT + API Key Authentication** — Role-based access control (`user` / `admin`) with login, registration, user management, and persistent API keys (`aa_sk_` prefix) for machine-to-machine usage
 - 🏊 **Browser Pool** — Reusable Playwright instances with configurable pool size, FIFO request queuing, and idle timeout cleanup
 - 📥 **Book Download** — Resolves real download links from slow servers and LibGen with automatic DDoS-guard cooldown handling
 - 🔗 **Related Books Engine** — Multi-signal recommendation scoring (author, title keywords, publisher, extension)
+- 🧩 **Robust Parsing** — Icon-based author/publisher extraction, fallback info-line parser for missing fields, scoped external link detection
 
 ## 🚀 Getting Started
 
@@ -54,7 +55,7 @@ The server starts at **http://localhost:3000**.
 
 ## 📖 API Reference
 
-All endpoints except `/health` and `/api/auth/login` require a **Bearer token** (admin role noted where required). Full OpenAPI spec at [openapi.yaml](./openapi.yaml).
+All endpoints except `/health` and `/api/auth/login` require a **Bearer token** (`Authorization: Bearer <jwt_or_api_key>`). Full details in [openapi.yaml](./openapi.yaml).
 
 | Method | Endpoint | Description | Auth |
 |---|---|---|---|
@@ -75,224 +76,7 @@ All endpoints except `/health` and `/api/auth/login` require a **Bearer token** 
 | `GET` | `/api/auth/users/:id/api-keys` | List any user's API keys | ✅ Admin |
 | `DELETE` | `/api/cache` | Flush the entire cache | ✅ Admin |
 
-### Search
-```
-GET /api/search?q=<query>&page=<n>&lang=<lang>&ext=<ext>&sort=<sort>&content=<type>
-```
-Advanced multi-field search (up to 9 fields) with field types `title`, `author`, `publisher`, `edition_varia`, `year`, `original_filename`, `description_comments`:
-```
-GET /api/search?termtype_1=author&termval_1=asimov&termtype_2=year&termval_2=1950
-```
-
-| Param | Type | Description |
-|---|---|---|
-| `q` | `string` | Search query |
-| `page` | `number` | Page number (default: `1`) |
-| `lang` | `string` | Language filter (e.g. `en`, `fr`) |
-| `ext` | `string` | Extension filter (e.g. `pdf`, `epub`) |
-| `sort` | `enum` | `most_relevant`, `newest`, `oldest`, `largest`, `smallest`, `newest_added`, `oldest_added`, `random` |
-| `content` | `enum` | `book_any`, `book_fiction`, `book_nonfiction`, `magazine`, `standards_document`, `comics`, `other` |
-| `index` | `enum` | `journals`, `digital_lending`, `meta` |
-| `termtype_N` | `enum` | Field type: `title`, `author`, `publisher`, `edition_varia`, `year`, `original_filename`, `description_comments` |
-| `termval_N` | `string` | Field value (paired with `termtype_N`) |
-
-### Book Details
-```
-GET /api/book/:md5?refresh=true
-```
-Returns full metadata: title, author, publisher, year, ISBN, collections, file paths, IPFS CIDs, and download links (fast, slow, external).
-
-### Related Books
-```
-GET /api/book/:md5/related?limit=10
-```
-Scoring signals: author match (+30–70), title keywords (+15), publisher match (+10), same extension (+5). Near-duplicate titles penalized (−50).
-
-### Download
-```
-GET /api/book/:md5/download?source=auto
-```
-| Param | Default | Description |
-|---|---|---|
-| `source` | `auto` | `auto` (libgen → slow), `libgen`, or `slow` |
-| `refresh` | `false` | Bypass cache |
-
-Automatically handles DDoS-guard challenges and LibGen ad-page link resolution, then streams the file.
-
-### Health
-```
-GET /health
-```
-Returns uptime, server start time, live memory usage, per-domain up/down status, live cache statistics, and browser pool utilization. Domain status cached 10 min; everything else is fresh per request.
-
-## 🔐 Authentication
-
-The API supports two authentication methods:
-- **JWT tokens** — obtained via login; short-lived (default 24h)
-- **API keys** — persistent tokens prefixed with `aa_sk_`; can be created and revoked per-user
-
-Either method is passed as a `Bearer` token in the `Authorization` header:
-
-```
-Authorization: Bearer <token_or_api_key>
-```
-
-### Default Admin Account
-
-On first launch, a default admin is auto-seeded:
-
-| Username | Password | Role |
-|---|---|---|
-| `admin` | `admin` | `admin` |
-
-> ⚠️ Change the default password immediately in production.
-
-```bash
-# Login
-curl -X POST http://localhost:3000/api/auth/login \
-	-H "Content-Type: application/json" \
-	-d '{"username":"admin","password":"admin"}'
-
-# Use the returned token
-curl http://localhost:3000/api/search?q=neuromancer \
-	-H "Authorization: Bearer <token>"
-```
-
-| Role | Permissions |
-|---|---|
-| `admin` | Register/list/update users, view user API usage, flush cache, all data endpoints |
-| `user` | Search, book details, related books, download |
-
-Login and registration responses now include per-endpoint rate limit fields:
-
-```json
-{
-	"user": {
-		"rateLimitBookDetail": -1,
-		"rateLimitBookDownload": -1,
-		"rateLimitBookRelated": -1,
-		"rateLimitSearch": -1
-	}
-}
-```
-
-`-1` means unlimited, `0` means blocked. Registering a new user applies the `DEFAULT_RATE_LIMIT_*` defaults.
-
-### View your own rate limits
-
-```
-GET /api/auth/me
-```
-
-Returns your account details and real-time rate limit usage for the current window:
-
-```json
-{
-	"user": { "id": "...", "username": "admin", "role": "admin" },
-	"rateLimits": {
-		"bookDetail":   { "limit": -1, "current": 0 },
-		"bookDownload":  { "limit": -1, "current": 0 },
-		"bookRelated":   { "limit": -1, "current": 0 },
-		"search":        { "limit": -1, "current": 0 }
-	}
-}
-```
-
-### API Key Management
-
-API keys are persistent tokens that serve as an alternative to JWT authentication. They use a `aa_sk_` prefix and never expire unless explicitly revoked. Each user can create multiple named keys for different applications or services.
-
-#### Creating an API Key
-
-```bash
-curl -X POST http://localhost:3000/api/auth/api-keys \
-	-H "Authorization: Bearer <jwt_or_api_key>" \
-	-H "Content-Type: application/json" \
-	-d '{"name":"my-app"}'
-```
-
-Response (raw key shown **once** — store it securely):
-
-```json
-{
-	"success": true,
-	"apiKey": {
-		"id": "uuid",
-		"name": "my-app",
-		"key": "aa_sk_Xk3mR9vTqL2nPwYdJcBsHfUeAiOgMzNl",
-		"keyPrefix": "aa_sk_Xk3mR9...",
-		"createdAt": "2026-05-31T12:00:00.000Z"
-	}
-}
-```
-
-> ⚠️ The full key is only returned on creation. If lost, revoke it and create a new one.
-
-#### Using an API Key
-
-Pass it as a Bearer token — exactly like a JWT:
-
-```bash
-curl http://localhost:3000/api/search?q=neuromancer \
-	-H "Authorization: Bearer aa_sk_Xk3mR9vTqL2nPwYdJcBsHfUeAiOgMzNl"
-```
-
-#### Listing Your API Keys
-
-```bash
-curl http://localhost:3000/api/auth/api-keys \
-	-H "Authorization: Bearer <jwt_or_api_key>"
-```
-
-Returns metadata only (prefix, name, dates) — full keys and hashes are never exposed:
-
-```json
-{
-	"success": true,
-	"apiKeys": [
-		{
-			"id": "uuid",
-			"keyPrefix": "aa_sk_Xk3mR9...",
-			"name": "my-app",
-			"lastUsedAt": "2026-05-31T12:30:00.000Z",
-			"createdAt": "2026-05-31T12:00:00.000Z",
-			"revokedAt": null
-		}
-	]
-}
-```
-
-#### Revoking an API Key
-
-```bash
-curl -X DELETE http://localhost:3000/api/auth/api-keys/:id \
-	-H "Authorization: Bearer <jwt_or_api_key>"
-```
-
-Once revoked, the key can no longer authenticate requests. Revocation is permanent — create a new key if needed.
-
-#### Admin: View Any User's API Keys
-
-```bash
-curl http://localhost:3000/api/auth/users/:id/api-keys \
-	-H "Authorization: Bearer <admin_jwt_or_api_key>"
-```
-
-#### How It Works
-
-- Keys are stored as **SHA-256 hashes** — the raw key is never persisted
-- A 60-second in-memory cache avoids a database lookup on every request
-- Each request updates `lastUsedAt` non-blockingly
-- Revoked keys are immediately removed from the in-memory cache
-- When authenticating, the middleware auto-detects the `aa_sk_` prefix and routes to API key validation instead of JWT verification
-
-### View user API usage (Admin)
-
-```
-GET /api/auth/users/:id/usage?limit=100&offset=0
-```
-
-Returns paginated usage records and current rate limit usage for a specific user. Max 500 records per request.
+On first launch a default admin is seeded — **username: `admin`, password: `admin`**. Change it before going to production.
 
 ## ⚙️ Configuration
 
@@ -338,7 +122,7 @@ Flush cache: `DELETE /api/cache` (admin only).
 ### Domain Rotation
 Default mirrors: `annas-archive.gl`, `annas-archive.org`, `annas-archive.se`, `annas-archive.gd`, `annas-archive.pk`.
 
-The scraper tries healthy domains first, marks failures as down for 600 seconds, retries with exponential backoff, and falls back through the full list if all are down.
+The scraper tries healthy domains first, marks failures as down for 600 seconds, and marks HTTP 429 responses as rate-limited for 2 minutes (skipped immediately, no retries). Retries use exponential backoff; falls back through the full list if all are unavailable.
 
 ## 📁 Project Structure
 

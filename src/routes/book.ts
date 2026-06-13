@@ -521,10 +521,10 @@ router.get('/:md5/download', async (req: Request, res: Response): Promise<any> =
     }
 
     // ── Set response headers for file download ─────────────────────────────────
-    const filename = contentDisposition(book.filename || `${book.title}.${book.extension || 'bin'}`);
+    const disposition = contentDisposition(book.filename || `${book.title}.${book.extension || 'bin'}`);
     res.setHeader('Content-Type', downloadResult.headers['content-type'] || 'application/octet-stream');
     res.setHeader('Content-Length', downloadResult.headers['content-length'] || '0');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Content-Disposition', disposition);
 
     // ── Stream the file ────────────────────────────────────────────────────────
     downloadResult.stream.pipe(res);

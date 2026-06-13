@@ -111,7 +111,7 @@ export function parseSearchResults(html: string, domain: string): SearchResults 
     // --- Book type / category (emoji + label before the · sources) ---
     // e.g. "📕 Book (fiction)", "📘 Book (non-fiction)", "📗 Book (unknown)", "💬 Comic book"
     const typeMatch = metaText.match(/[📕📘📗📰💬🎶📝🤨]\s*([^·\n]+)/u);
-    const bookType = typeMatch ? typeMatch[1].trim() : null;
+    const contentType = typeMatch ? typeMatch[1].trim() : null;
 
     // --- Issue flag (row has opacity-40 class) ---
     const hasIssues = $row.hasClass('opacity-40');
@@ -130,7 +130,7 @@ export function parseSearchResults(html: string, domain: string): SearchResults 
       filename,
       downloads,
       lists,
-      bookType,
+      contentType,
       hasIssues,
       url: `https://${domain}/md5/${md5}`,
     };
@@ -198,11 +198,36 @@ export function parseBookDetail(html: string, md5: string, domain: string): Book
   }
 
   // ── Author / Publisher ─────────────────────────────────────────────────────
-  // The page renders author and publisher as search links.
-  // Index 0 = search icon link (skip), 1 = author, 2 = publisher+meta string.
-  const searchLinks = $('a[href*="/search?q="]').filter((_, el) => !!$(el).text().trim());
-  const author = $(searchLinks[1]).text().trim() || null;
-  const rawPub = $(searchLinks[2]).text().trim() || null;
+  // Author link is marked by a sibling/descendant <span class="icon-[mdi--user-edit]">,
+  // publisher link by <span class="icon-[mdi--company]">.
+  const findLinkByIcon = (iconClass: string): any | null => {
+    const icon = $('[class]')
+      .filter((_, el) => (($(el).attr('class') || '').split(/\s+/).includes(iconClass)))
+      .first();
+    if (!icon.length) return null;
+    let link = icon.closest('a[href*="/search?q="]');
+    if (!link.length) link = icon.parent().find('a[href*="/search?q="]').first();
+    if (!link.length) link = icon.siblings('a[href*="/search?q="]').first();
+    return link.length ? link.get(0) : null;
+  };
+
+  const getSearchQueryParam = (el: any): string | null => {
+    const href = $(el).attr('href');
+    if (!href) return null;
+    try {
+      const url = new URL(href, `https://${domain}`);
+      const q = url.searchParams.get('q');
+      return q?.trim() || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const authorEl = findLinkByIcon('icon-[mdi--user-edit]');
+  const publisherEl = findLinkByIcon('icon-[mdi--company]');
+
+  const author = authorEl ? (getSearchQueryParam(authorEl) ?? ($(authorEl).text().trim() || null)) : null;
+  const rawPub = publisherEl ? $(publisherEl).text().trim() || null : null;
 
   // Publisher string format: "Bloomsbury, Harry Potter, #4, London, Great Britain, 2015"
   let publisher: string | null = null;
@@ -280,13 +305,13 @@ export function parseBookDetail(html: string, md5: string, domain: string): Book
   };
 
   // Language: codes tab "Language" → e.g. "en"
-  const language: string | null = (() => {
+  let language: string | null = (() => {
     const v = getTabValue('Language');
     return v ? v.toLowerCase() : null;
   })();
 
   // Extension: inferred from any Filepath tab value
-  const extension: string | null = (() => {
+  let extension: string | null = (() => {
     let ext: string | null = null;
     $('.js-md5-codes-tabs-tab').each((_, el) => {
       const spans = $(el).find('span');
@@ -304,10 +329,41 @@ export function parseBookDetail(html: string, md5: string, domain: string): Book
     return v ? parseInt(v, 10) : null;
   })();
 
-  const filesize: string | null = filesizeBytes !== null ? `${filesizeBytes} bytes` : null;
+  let filesize: string | null = filesizeBytes !== null ? `${filesizeBytes} bytes` : null;
 
   // Content type: codes tab "Content Type" → e.g. "book_fiction"
-  const contentType: string | null = getTabValue('Content Type');
+  let contentType: string | null = getTabValue('Content Type');
+
+  // ── Fallback info line ──────────────────────────────────────────────────
+  // Parse the page body as a · -delimited info line only for fields the
+  // codes-panel tabs did not provide.
+  let fbCollection: string | null = null;
+  if (!language || !extension || !filesize || !contentType || !year) {
+    const infoParts = bodyText.split('·').map((s: string) => s.trim()).filter(Boolean);
+    for (const part of infoParts) {
+      // Language: "English [en]"
+      if (!language) {
+        const langMatch = part.match(/^(.+?)\s*\[([a-z]{2,3})\]$/i);
+        if (langMatch) { language = langMatch[2].toLowerCase(); continue; }
+      }
+      // Filesize: "0.3MB", "300KB", "1.2GB"
+      if (!filesize && /^[\d.]+\s*[KMGT]?B$/i.test(part)) { filesize = part; continue; }
+      // Year: standalone 1–4 digit number
+      if (!year && /^\d{1,4}$/.test(part)) { year = part; continue; }
+      // Collection/source: emoji + slash, e.g. "🚀/zlib", "🐢/libgen"
+      if (!fbCollection && part.includes('/') && (part.codePointAt(0) ?? 0) >= 0x1f000) {
+        fbCollection = part.replace(/^\S+\s*/, '').trim() || null;
+        continue;
+      }
+      // Content type: emoji-prefixed label, e.g. "📗 Book (unknown)"
+      if (!contentType && (part.codePointAt(0) ?? 0) >= 0x1f000) {
+        contentType = part.replace(/^\S+\s*/, '').trim() || null;
+        continue;
+      }
+      // Format/extension: "EPUB", "PDF", "AZW3", etc.
+      if (!extension && /^[A-Z0-9]{2,6}$/.test(part)) { extension = part.toLowerCase(); continue; }
+    }
+  }
 
   // ── ISBNs — derived from identifiers map after it is built (see below) ─────
 
@@ -429,17 +485,12 @@ export function parseBookDetail(html: string, md5: string, domain: string): Book
   });
 
   const externalLinks: LinkStatus[] = [];
-  $('a').each((_, el) => {
-    const href = $(el).attr('href') ?? '';
-    const text = $(el).text().trim();
-    if (!text) return;
-    const isExternal =
-      href.includes('libgen') ||
-      href.includes('z-lib') ||
-      href.startsWith('ipfs://') ||
-      href.includes('libstc') ||
-      href.includes('/ipfs_downloads/');
-    if (isExternal && !externalLinks.some(l => l.url === href)) {
+  $('#md5-panel-downloads ul.js-show-external').find('li').each((_, li) => {
+    if ($(li).text().toLowerCase().includes('bulk torrent')) return;
+    const $a = $(li).find('a').first();
+    const href = $a.attr('href') ?? '';
+    const text = $a.text().trim();
+    if (href && text && !externalLinks.some(l => l.url === href)) {
       externalLinks.push({ label: text, url: href });
     }
   });
@@ -477,6 +528,7 @@ export function parseBookDetail(html: string, md5: string, domain: string): Book
     ...(series && { series }),
     ...(location && { location }),
     ...(alternateFilenames.length && { alternate_filenames: alternateFilenames }),
+    ...(fbCollection && { source_collection: fbCollection }),
     ...(Object.keys(dates).length && { dates }),
     ...(statsTotal !== null && { downloads_total: statsTotal }),
     ...(listsCount !== null && { lists_count: listsCount }),

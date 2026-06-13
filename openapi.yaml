@@ -116,7 +116,7 @@ components:
         lists:
           type: integer
           nullable: true
-        bookType:
+        contentType:
           type: string
           nullable: true
           description: Content category (e.g. "Book (fiction)")

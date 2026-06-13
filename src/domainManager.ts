@@ -7,8 +7,10 @@ const mirrors = config.domains;
 
 
 // Persistent history of domain health
+const RATE_LIMIT_TTL_MS = 2 * 60 * 1000; // 2 minutes
+
 interface DomainInfo {
-  status: 'healthy' | 'down' | 'unknown';
+  status: 'healthy' | 'down' | 'rate-limited' | 'unknown';
   lastError?: string;
   lastChecked?: number;
 }
@@ -27,7 +29,8 @@ export function getOrderedDomains(): string[] {
     const info = history.get(domain);
 
     if (info?.status === 'down' && info.lastChecked && (now - info.lastChecked) < config.cache.ttlDomain * 1000) {
-      // Still within the down grace period
+      failing.push(domain);
+    } else if (info?.status === 'rate-limited' && info.lastChecked && (now - info.lastChecked) < RATE_LIMIT_TTL_MS) {
       failing.push(domain);
     } else {
       healthy.push(domain);
@@ -54,6 +57,19 @@ export function markFailed(domain: string, error?: string): void {
 }
 
 /**
+ * Mark a domain as rate-limited (429). It will be skipped for 2 minutes, then retried.
+ */
+export function markRateLimited(domain: string): void {
+  history.set(domain, {
+    status: 'rate-limited',
+    lastError: 'HTTP 429 Too Many Requests',
+    lastChecked: Date.now(),
+  });
+
+  logger.warn(`Domain ${domain} rate-limited (429) — will recheck in 2 minutes`);
+}
+
+/**
  * Mark a domain as healthy.
  */
 export function markHealthy(domain: string): void {
@@ -67,6 +83,35 @@ export function markHealthy(domain: string): void {
 }
 
 /**
+ * Returns ms until the next temporarily-blocked domain becomes available again.
+ * Returns null when no domain is in a temporary state (all are healthy or hard-failed with no recorded TTL).
+ * Used by fetchWithRotation to decide how long to wait before retrying.
+ */
+export function getEarliestRecoveryMs(): number | null {
+  const now = Date.now();
+  let earliest: number | null = null;
+
+  for (const domain of mirrors) {
+    const info = history.get(domain);
+    if (!info?.lastChecked) continue;
+
+    let expiresAt: number | null = null;
+    if (info.status === 'rate-limited') {
+      expiresAt = info.lastChecked + RATE_LIMIT_TTL_MS;
+    } else if (info.status === 'down') {
+      expiresAt = info.lastChecked + config.cache.ttlDomain * 1000;
+    }
+
+    if (expiresAt !== null && expiresAt > now) {
+      const remaining = expiresAt - now;
+      if (earliest === null || remaining < earliest) earliest = remaining;
+    }
+  }
+
+  return earliest;
+}
+
+/**
  * Get the current health status of all tracked domains.
  */
 export function getDomainStatus(): DomainHealth[] {
@@ -74,10 +119,13 @@ export function getDomainStatus(): DomainHealth[] {
   return mirrors.map(domain => {
     const info = history.get(domain);
     const isDown = info?.status === 'down' && !!info.lastChecked && (now - info.lastChecked) < config.cache.ttlDomain * 1000;
+    const isRateLimited = info?.status === 'rate-limited' && !!info.lastChecked && (now - info.lastChecked) < RATE_LIMIT_TTL_MS;
 
     let status: DomainHealth['status'] = 'up';
     if (isDown) {
       status = 'down';
+    } else if (isRateLimited) {
+      status = 'rate-limited';
     }
 
     return {

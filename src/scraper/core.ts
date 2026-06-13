@@ -215,28 +215,39 @@ async function fetchPage(url: string, domain: string): Promise<string> {
  * Try each domain in rotation order until one succeeds or all fail.
  */
 export async function fetchWithRotation(buildUrl: (domain: string) => string): Promise<{ html: string; domain: string }> {
-  const domains = domainMgr.getOrderedDomains();
   let lastError: Error | undefined;
+
+  const domains = domainMgr.getOrderedDomains();
 
   for (const domain of domains) {
     const url = buildUrl(domain);
+    let rateLimited = false;
+
     for (let attempt = 1; attempt <= config.scraping.maxRetries; attempt++) {
       try {
         const html = await fetchPage(url, domain);
         return { html, domain };
       } catch (err: any) {
-        logger.warn(`[${domain}] Attempt ${attempt}/${config.scraping.maxRetries} failed: ${err.message}`);
         lastError = err;
 
+        if (err.message?.includes('HTTP 429')) {
+          domainMgr.markRateLimited(domain);
+          rateLimited = true;
+          break;
+        }
+
+        logger.warn(`[${domain}] Attempt ${attempt}/${config.scraping.maxRetries} failed: ${err.message}`);
+
         if (attempt < config.scraping.maxRetries) {
-          await sleep(config.scraping.retryDelay * attempt); // exponential-ish backoff
+          await sleep(config.scraping.retryDelay * attempt);
         }
       }
     }
 
-    // All retries exhausted for this domain
-    domainMgr.markFailed(domain, lastError?.message);
-    logger.warn(`All retries failed for ${domain}, rotating to next mirror`);
+    if (!rateLimited) {
+      domainMgr.markFailed(domain, lastError?.message);
+      logger.warn(`All retries failed for ${domain}, rotating to next mirror`);
+    }
   }
 
   throw new Error(`All mirrors unreachable. Last error: ${lastError?.message}`);

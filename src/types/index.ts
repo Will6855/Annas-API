@@ -28,7 +28,7 @@ export interface SearchResult {
   filename?: string | null;
   downloads?: number | null;
   lists?: number | null;
-  bookType?: string | null;
+  contentType?: string | null;
   hasIssues?: boolean;
   url: string;
   relevanceScore?: number;
@@ -84,7 +84,7 @@ export interface ScrapeRelatedResponse {
 
 export interface DomainHealth {
   domain: string;
-  status: 'up' | 'down';
+  status: 'up' | 'down' | 'rate-limited';
   lastChecked?: string;
   lastError?: string | null;
 }
